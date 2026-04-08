@@ -11,11 +11,11 @@ router.get("/:username", checkAuth, userController.getUserByUsername);
 router.post("/follow/:userId", checkAuth, userController.toggleFollow);
 router.put(
   "/edit-profile",
+  checkAuth,
   upload.fields([
     { name: "avatar", maxCount: 1 },
     { name: "cover_image", maxCount: 1 },
   ]),
-  checkAuth,
   userController.editProfile
 );
 router.post("/settings", checkAuth, userController.settings);

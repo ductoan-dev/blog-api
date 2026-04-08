@@ -33,12 +33,12 @@ exports.checkFollowing = async (req, res) => {
     response.error(res, 400, error.message);
   }
 };
-
 exports.editProfile = async (req, res) => {
   try {
     const result = await userService.editProfile(req.files, req.body, req.user);
     response.succsess(res, 200, result);
   } catch (error) {
+    console.error(error);
     response.error(res, 400, error.message);
   }
 };

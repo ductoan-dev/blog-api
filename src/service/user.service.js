@@ -224,15 +224,15 @@ class UserService {
 
     const updateData = {};
 
-    if (avatarOrCoverPath) {
-      if (avatarOrCoverPath.avatar?.[0].path != null)
-        updateData.avatar = avatarOrCoverPath.avatar?.[0].path.replace(
-          /\\/g,
-          "/"
-        ); // normalize path
-      if (avatarOrCoverPath.cover_image?.[0].path != null)
-        updateData.cover_image =
-          avatarOrCoverPath.cover_image?.[0].path.replace(/\\/g, "/");
+    // Nếu có file mới thì cập nhật, không thì bỏ qua
+    if (avatarOrCoverPath?.avatar?.[0]?.path) {
+      updateData.avatar = avatarOrCoverPath.avatar[0].path.replace(/\\/g, "/");
+    }
+    if (avatarOrCoverPath?.cover_image?.[0]?.path) {
+      updateData.cover_image = avatarOrCoverPath.cover_image[0].path.replace(
+        /\\/g,
+        "/"
+      );
     }
 
     const newData = { ...updateData, ...data };
@@ -243,6 +243,7 @@ class UserService {
       throw new Error(error);
     }
   }
+
   async setting(data, currentUser) {
     if (!currentUser) throw new Error("You must be logged to edit settings");
     const { email, ...settings } = data;
