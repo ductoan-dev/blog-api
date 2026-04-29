@@ -1,10 +1,8 @@
-const { where } = require("sequelize");
 const { Post, Topic, User, Like, Sequelize, Op } = require("@/db/models");
 const likesService = require("@/service/like.service");
 const topicsService = require("@/service/topic.service");
 const usersService = require("@/service/user.service");
 const slugify = require("slugify");
-const { post } = require("@/routes/api");
 class PostsService {
   async getAll() {
     const posts = await Post.findAll({
@@ -54,7 +52,7 @@ class PostsService {
       include: [
         {
           model: Topic,
-          as: "topic",
+          as: "topics",
         },
         {
           model: User,
@@ -142,10 +140,7 @@ class PostsService {
 
     const postIds = posts.map((post) => post.id);
 
-    const likes = await likesService.getAll(
-      "Post",
-      postIds.map((post) => post.id)
-    );
+    const likes = await likesService.getAll("Post", postIds);
 
     const currentUserLikes = new Set();
     const currentUserBookmark = new Set();
@@ -248,7 +243,7 @@ class PostsService {
         ],
       });
       const followingIds = await usersService.getUserFollowingIds(currentUser);
-      const postVisible = await posts.filter((post) =>
+      const postVisible = posts.filter((post) =>
         this.canUserViewPost(post, currentUser, followingIds)
       );
       return this.handleLikeAndBookmarkFlags(postVisible, currentUser);
@@ -331,40 +326,40 @@ class PostsService {
 
     if (postByTopics.length >= 3) {
       allPosts = postByTopics;
+    } else {
+      const existingIds = postByTopics.map((item) => item.id);
+      const excludeIds = [currentPostId, ...existingIds];
+
+      const morePosts = await Post.findAll({
+        where: {
+          id: { [Op.notIn]: excludeIds },
+          status: "published",
+          published_at: { [Op.lte]: new Date() },
+        },
+        include: [
+          {
+            model: Topic,
+            as: "topics",
+            through: { attributes: [] },
+          },
+          {
+            model: User,
+            as: "user",
+            attributes: ["id", "avatar", "first_name", "last_name"],
+          },
+          {
+            model: User,
+            as: "usersBookmarked",
+            attributes: ["id"],
+          },
+        ],
+
+        limit: 3 - postByTopics.length,
+        order: Sequelize.literal("RAND()"),
+      });
+
+      allPosts = [...morePosts, ...postByTopics];
     }
-
-    const existingIds = postByTopics.map((item) => item.id);
-    const excludeIds = [currentPostId, ...existingIds];
-
-    const morePosts = await Post.findAll({
-      where: {
-        id: { [Op.notIn]: excludeIds },
-        status: "published",
-        published_at: { [Op.lte]: new Date() },
-      },
-      include: [
-        {
-          model: Topic,
-          as: "topics",
-          through: { attributes: [] },
-        },
-        {
-          model: User,
-          as: "user",
-          attributes: ["id", "avatar", "first_name", "last_name"],
-        },
-        {
-          model: User,
-          as: "usersBookmarked",
-          attributes: ["id"],
-        },
-      ],
-
-      limit: 3 - postByTopics.length,
-      order: Sequelize.literal("RAND()"),
-    });
-
-    allPosts = [...morePosts, ...postByTopics];
 
     const followingIds = await usersService.getUserFollowingIds(currentUser);
 
@@ -422,7 +417,7 @@ class PostsService {
     }
 
     if (!data.published_at) {
-      updateData.published_at = Date.now();
+      updateData.published_at = new Date();
     }
 
     const { topics, ...remain } = data;

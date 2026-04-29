@@ -8,6 +8,9 @@ const {
   Sequelize,
 } = require("@/db/models");
 
+const isEmail = (value) =>
+  typeof value === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+
 class UserService {
   async getAllUser() {
     const user = await User.findAll();
@@ -17,7 +20,7 @@ class UserService {
     const user = await User.findOne({ where: { id } });
     return user;
   }
-  async canUserViewProfile(currentUser, targetUser, followingIds = []) {
+  canUserViewProfile(currentUser, targetUser, followingIds = []) {
     const profileVisibility = this.getUserProfileVisibility(targetUser);
 
     if (!currentUser) {
@@ -60,7 +63,7 @@ class UserService {
       type: "unknown",
     };
   }
-  async getUserProfileVisibility(user) {
+  getUserProfileVisibility(user) {
     try {
       if (user.settings && user.settings.data) {
         const settingsData = JSON.parse(user.settings.data);
@@ -162,7 +165,7 @@ class UserService {
       include: {
         model: UserSetting,
         as: "settings",
-        require: false,
+        required: false,
       },
     });
     const hasFollowingUser = await currentUser.hasFollowing(userId);
@@ -184,7 +187,9 @@ class UserService {
       await userFollower.save();
       await userFollowing.save();
       try {
-        const settings = JSON.parse(userFollower.settings.data);
+        const settings = userFollower?.settings?.data
+          ? JSON.parse(userFollower.settings.data)
+          : {};
         if (settings.emailNewFollowers) {
           await Queue.create({
             type: "sendNewFollowerJob",
@@ -248,7 +253,7 @@ class UserService {
     if (!currentUser) throw new Error("You must be logged to edit settings");
     const { email, ...settings } = data;
     if (email !== currentUser.email) {
-      if (email && !validator.isEmail(email)) {
+      if (email && !isEmail(email)) {
         throw new Error("Invalid email address");
       }
       await currentUser.update({ verified_at: null, email });

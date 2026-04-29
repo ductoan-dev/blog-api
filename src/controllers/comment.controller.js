@@ -87,7 +87,6 @@ const update = async (req, res) => {
   } catch (error) {
     response.error(res, 400, error.message);
   }
-  response.error(res, 400, error.message);
 };
 const remove = async (req, res) => {
   await commentService.remove(req.params.id);

@@ -146,13 +146,16 @@ const verifyEmail = async (token) => {
       token,
       process.env.MAIL_JWT_SECRET
     );
-    const { dataValues: user } = await User.findOne({ where: { id: userId } });
+    const user = await User.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new Error("User không tồn tại");
+    }
     if (user.verified_at) {
       return "verified";
     }
     await User.update(
       {
-        verified_at: Date.now(),
+        verified_at: new Date(),
       },
       {
         where: { id: userId },

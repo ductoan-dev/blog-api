@@ -1,6 +1,5 @@
 const response = require("@/utils/response");
 const postService = require("@/service/post.service");
-const { post } = require("@/routes/api");
 
 const index = async (req, res) => {
   const { posts } = await postService.getAll();

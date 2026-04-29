@@ -6,8 +6,6 @@ const {
   Queue,
   Like,
 } = require("@/db/models");
-const sequelize = require("@/db/models");
-const usersModel = require("@/db/models/users.model");
 const likesService = require("@/service/like.service");
 const { Op } = require("sequelize");
 
@@ -17,7 +15,7 @@ class CommentService {
 
     return comments;
   }
-  async getById() {
+  async getById(id) {
     const comment = await Comment.findOne({
       where: { id },
       include: [{ model: Post, as: "post" }],
@@ -121,10 +119,7 @@ class CommentService {
 
     const commentIds = allComments.map((comment) => comment?.id);
 
-    const likes = await likesService.getAll(
-      "Comment",
-      commentIds.map((c) => c.id)
-    );
+    const likes = await likesService.getAll("Comment", commentIds);
 
     const currentUserLikes = new Set();
     likes.forEach((like) => {
@@ -321,7 +316,9 @@ class CommentService {
             as: "settings",
           },
         });
-        const settings = JSON.parse(userPost.settings.data);
+        const settings = userPost?.settings?.data
+          ? JSON.parse(userPost.settings.data)
+          : {};
         if (userPost.id !== currentUser.id && settings.emailNewComments) {
           await Queue.create({
             type: "sendNewCommentJob",
@@ -357,7 +354,7 @@ class CommentService {
       }
 
       // comment.content = data.content;
-      comment.deleted_at = Date.now();
+      comment.deleted_at = new Date();
       await comment.save();
 
       return comment;
