@@ -2,6 +2,8 @@ const { Post, Topic, User } = require("@/db/models");
 const sequelize = require("@/db/models").sequelize; // hoặc require("@/config/database")
 const likesService = require("@/service/like.service");
 const { Op } = require("sequelize");
+const slugify = require("slugify");
+const { faker } = require("@faker-js/faker");
 
 class TopicService {
   async getAll() {

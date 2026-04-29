@@ -29,6 +29,9 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.STRING,
         unique: true,
       },
+      fullname: {
+        type: DataTypes.STRING,
+      },
 
       avatar: {
         type: DataTypes.STRING,
@@ -76,40 +79,22 @@ module.exports = (sequelize, DataTypes) => {
         defaultValue: null,
       },
 
-      // location: {
-      //   type: DataTypes.STRING,
-      //   allowNull: true,
-      // },
-      // skills: {
-      //   type: DataTypes.TEXT,
-      //   allowNull: true,
-      //   get() {
-      //     const raw = this.getDataValue("skills");
-      //     return raw ? JSON.parse(raw) : [];
-      //   },
-      //   set(value) {
-      //     this.setDataValue("skills", JSON.stringify(value));
-      //   },
-      // },
-      // privacy: {
-      //   type: DataTypes.JSON,
-      //   defaultValue: {
-      //     profileVisibility: "public",
-      //     showEmail: false,
-      //     showFollowersCount: true,
-      //     showFollowingCount: true,
-      //     allowDirectMessages: true,
-      //     showOnlineStatus: true,
-      //   },
-      // },
-      // badges: {
-      //   type: DataTypes.JSON,
-      //   allowNull: true,
-      // },
-      // cover_image: {
-      //   type: DataTypes.STRING,
-      //   allowNull: true,
-      // },
+      location: {
+        type: DataTypes.STRING,
+        allowNull: true,
+      },
+      skills: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+      },
+      badges: {
+        type: DataTypes.JSON,
+        allowNull: true,
+      },
+      cover_image: {
+        type: DataTypes.STRING,
+        allowNull: true,
+      },
     },
     {
       tableName: "users",

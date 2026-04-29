@@ -10,6 +10,10 @@ class PostsService {
         { model: Topic, as: "topics" },
         { model: User, as: "user" },
       ],
+      order: [
+        ["published_at", "DESC"],
+        ["createdAt", "DESC"],
+      ],
     });
     const result = posts.map((post) => {
       const postData = post.toJSON();
@@ -253,7 +257,7 @@ class PostsService {
   }
 
   async getRelatedPosts(currentPostId, currentUser) {
-    const currentPostTopic = await Post.findOne({
+    const currentPost = await Post.findOne({
       where: {
         id: currentPostId,
         status: "published",
@@ -266,99 +270,68 @@ class PostsService {
       },
     });
 
-    if (!currentPostTopic) throw new Error("Post not found");
+    if (!currentPost) throw new Error("Post not found");
 
-    const topicIds = currentPostTopic.topics.map((item) => item.id);
+    const topicIds = currentPost.topics.map((item) => item.id);
 
-    let allPosts = [];
+    const publishedScope = {
+      id: { [Op.ne]: currentPostId },
+      status: "published",
+      published_at: { [Op.lte]: new Date() },
+    };
 
-    if (topicIds.length === 0) {
-      const posts = await Post.findAll({
-        where: { id: { [Op.not]: currentPostId } },
-        limit: 3,
-        order: Sequelize.literal("RAND()"),
+    const userInclude = {
+      model: User,
+      as: "user",
+      attributes: ["id", "avatar", "first_name", "last_name"],
+    };
+    const bookmarkInclude = {
+      model: User,
+      as: "usersBookmarked",
+      attributes: ["id"],
+    };
 
-        include: [
-          { model: Topic, as: "topics" },
-          {
-            model: User,
-            as: "user",
-            attributes: ["id", "avatar", "first_name", "last_name"],
-          },
-          {
-            model: User,
-            as: "usersBookmarked",
-            attributes: ["id"],
-          },
-        ],
-      });
-
-      allPosts = posts;
-    }
-
-    const postByTopics = await Post.findAll({
-      where: { id: { [Op.not]: currentPostId } },
-      include: [
-        {
-          model: Topic,
-          as: "topics",
-          through: { attributes: [] },
-
-          where: {
-            id: topicIds,
-          },
-        },
-        {
-          model: User,
-          as: "user",
-          attributes: ["id", "avatar", "first_name", "last_name"],
-        },
-        {
-          model: User,
-          as: "usersBookmarked",
-          attributes: ["id"],
-        },
-      ],
-
-      limit: 3,
-      order: Sequelize.literal("RAND()"),
-    });
-
-    if (postByTopics.length >= 3) {
-      allPosts = postByTopics;
-    } else {
-      const existingIds = postByTopics.map((item) => item.id);
-      const excludeIds = [currentPostId, ...existingIds];
-
-      const morePosts = await Post.findAll({
-        where: {
-          id: { [Op.notIn]: excludeIds },
-          status: "published",
-          published_at: { [Op.lte]: new Date() },
-        },
+    let postByTopics = [];
+    if (topicIds.length > 0) {
+      postByTopics = await Post.findAll({
+        where: publishedScope,
         include: [
           {
             model: Topic,
             as: "topics",
             through: { attributes: [] },
+            where: { id: topicIds },
+            required: true,
           },
-          {
-            model: User,
-            as: "user",
-            attributes: ["id", "avatar", "first_name", "last_name"],
-          },
-          {
-            model: User,
-            as: "usersBookmarked",
-            attributes: ["id"],
-          },
+          userInclude,
+          bookmarkInclude,
         ],
+        limit: 3,
+        order: Sequelize.literal("RAND()"),
+        subQuery: false,
+      });
+    }
 
+    let allPosts = postByTopics;
+
+    if (postByTopics.length < 3) {
+      const excludeIds = [currentPostId, ...postByTopics.map((p) => p.id)];
+
+      const morePosts = await Post.findAll({
+        where: {
+          ...publishedScope,
+          id: { [Op.notIn]: excludeIds },
+        },
+        include: [
+          { model: Topic, as: "topics", through: { attributes: [] } },
+          userInclude,
+          bookmarkInclude,
+        ],
         limit: 3 - postByTopics.length,
         order: Sequelize.literal("RAND()"),
       });
 
-      allPosts = [...morePosts, ...postByTopics];
+      allPosts = [...postByTopics, ...morePosts];
     }
 
     const followingIds = await usersService.getUserFollowingIds(currentUser);
@@ -440,12 +413,10 @@ class PostsService {
     const newTopics = JSON.parse(topics);
     await Promise.all(
       newTopics.map(async (item) => {
-        const { topic, created } = await topicsService.findOrCreate(item);
+        const { topic } = await topicsService.findOrCreate(item);
 
-        if (!created) {
-          topic.posts_count += 1;
-          await topic.save();
-        }
+        topic.posts_count = (topic.posts_count ?? 0) + 1;
+        await topic.save();
 
         await post.addTopic(topic.id);
       })

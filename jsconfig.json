@@ -1,15 +1,14 @@
 {
-
-    "compilerOptions": {
-
-        "baseUrl": "./src",
-
-        "paths": {
-
-            "@/*": ["./*"]
-
-        }
-
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "checkJs": false,
+    "baseUrl": "./src",
+    "paths": {
+      "@/*": ["*"]
     }
-
+  },
+  "include": ["src/**/*", "server.js"],
+  "exclude": ["node_modules", "uploads", "dist"]
 }
