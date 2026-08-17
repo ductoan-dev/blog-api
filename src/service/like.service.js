@@ -1,33 +1,42 @@
-const { Like } = require("@/db/models");
+const prisma = require("@/db/prisma");
 
 class LikesService {
   async getAll(type, ids) {
     const idArray = Array.isArray(ids) ? ids : [ids];
-    return await Like.find({
-      likeable_type: type,
-      likeable_id: { $in: idArray },
+    return prisma.like.findMany({
+      where: { likeableType: type, likeableId: { in: idArray } },
     });
   }
 
   async create(data) {
-    return await Like.create(data);
+    return prisma.like.create({
+      data: {
+        userId: data.user_id,
+        likeableType: data.likeable_type,
+        likeableId: data.likeable_id,
+        isLike: data.is_like ?? false,
+      },
+    });
   }
 
-  async update(user_id, data) {
+  async update(userId, data) {
     try {
-      const like = await Like.findOne({
-        user_id,
-        likeable_type: data.likeable_type,
-        likeable_id: data.likeable_id,
+      const like = await prisma.like.findFirst({
+        where: {
+          userId,
+          likeableType: data.likeable_type,
+          likeableId: data.likeable_id,
+        },
       });
 
       if (!like) {
         throw new Error("Không tìm thấy bản ghi like");
       }
 
-      like.is_like = data.is_like;
-      await like.save();
-      return like;
+      return prisma.like.update({
+        where: { id: like.id },
+        data: { isLike: data.is_like },
+      });
     } catch (error) {
       console.log("Lỗi khi update: ", error.message);
       return null;
@@ -35,11 +44,11 @@ class LikesService {
   }
 
   async checkLike(data) {
-    return await Like.create(data);
+    return this.create(data);
   }
 
-  async remove(user_id, type) {
-    await Like.deleteMany({ user_id, likeable_type: type });
+  async remove(userId, type) {
+    await prisma.like.deleteMany({ where: { userId, likeableType: type } });
     return null;
   }
 }
