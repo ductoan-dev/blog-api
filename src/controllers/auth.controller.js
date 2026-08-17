@@ -1,13 +1,14 @@
 const response = require("@/utils/response");
 const authService = require("@/service/auth.service");
-const { Queue } = require("@/db/models");
+const prisma = require("@/db/prisma");
+const { serializeUser } = require("@/utils/serializers");
+
 const register = async (req, res) => {
   try {
     const { userId, token } = await authService.register(req.body);
 
-    await Queue.create({
-      type: "sendVerifyEmailJob",
-      payload: { userId },
+    await prisma.queue.create({
+      data: { type: "sendVerifyEmailJob", payload: { userId } },
     });
 
     response.succsess(res, 200, token);
@@ -34,7 +35,7 @@ const me = async (req, res) => {
       return response.error(res, 401, "Token invalid");
     }
 
-    return response.succsess(res, 200, req.user);
+    return response.succsess(res, 200, serializeUser(req.user));
   } catch (error) {
     return response.error(res, 500, "Internal server error");
   }

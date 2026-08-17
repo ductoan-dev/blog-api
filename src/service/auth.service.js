@@ -1,23 +1,25 @@
-const { User, Queue } = require("@/db/models");
+const prisma = require("@/db/prisma");
 const { hash, compare } = require("@/utils/bcrypt");
 const jwtService = require("@/service/jwt.service");
 const refreshTokenService = require("@/service/refreshToken.service");
 
 const register = async (data) => {
-  const user = await User.create({
-    ...data,
-    password: await hash(data.password),
-    first_name: data.first_name,
-    last_name: data.last_name,
+  const user = await prisma.user.create({
+    data: {
+      email: data.email,
+      firstName: data.first_name,
+      lastName: data.last_name,
+      password: await hash(data.password),
+    },
   });
 
-  const userId = user._id;
+  const userId = user.id;
   const token = jwtService.generateAccessToken(userId);
   return { userId, token };
 };
 
 const login = async ({ email, password }) => {
-  const user = await User.findOne({ email }).lean();
+  const user = await prisma.user.findUnique({ where: { email } });
 
   if (!user) {
     throw new Error("Thông tin đăng nhập không hợp lệ");
@@ -28,8 +30,8 @@ const login = async ({ email, password }) => {
     throw new Error("Thông tin đăng nhập không hợp lệ");
   }
 
-  const tokenData = jwtService.generateAccessToken(user._id);
-  const refreshToken = await refreshTokenService.createRefreshToken(user._id);
+  const tokenData = jwtService.generateAccessToken(user.id);
+  const refreshToken = await refreshTokenService.createRefreshToken(user.id);
   return {
     ...tokenData,
     refresh_token: refreshToken.token,
@@ -40,12 +42,12 @@ const getProfile = async (fullname) => {
   const [firstName, ...rest] = fullname.split(" ");
   const lastName = rest.join(" ");
 
-  const user = await User.findOne({
-    first_name: { $regex: firstName, $options: "i" },
-    last_name: { $regex: lastName, $options: "i" },
-  })
-    .select("-password")
-    .lean();
+  const user = await prisma.user.findFirst({
+    where: {
+      firstName: { contains: firstName, mode: "insensitive" },
+      lastName: { contains: lastName, mode: "insensitive" },
+    },
+  });
 
   if (!user) {
     const error = new Error("Không tìm thấy người dùng");
@@ -53,28 +55,25 @@ const getProfile = async (fullname) => {
     throw error;
   }
 
-  return user;
+  const { password, twoFactorSecret, ...safeUser } = user;
+  return safeUser;
 };
 
 const forGotPassWord = async (email) => {
-  const user = await User.findOne({ email });
-
+  const user = await prisma.user.findUnique({ where: { email } });
   if (!user) {
     throw new Error("Không tìm thấy người dùng với email này");
   }
 
-  await User.findByIdAndUpdate(user._id, { verified_at: null });
-  await Queue.create({
-    type: "sendVerifyEmailJob",
-    payload: { userId: user._id.toString() },
+  await prisma.user.update({ where: { id: user.id }, data: { verifiedAt: null } });
+  await prisma.queue.create({
+    data: { type: "sendVerifyEmailJob", payload: { userId: user.id } },
   });
 };
 
 const resetPassword = async (data, currentUser) => {
-  if (currentUser && currentUser._id) {
-    const userWithPassword = await User.findById(currentUser._id).select(
-      "_id password"
-    );
+  if (currentUser && currentUser.id) {
+    const userWithPassword = await prisma.user.findUnique({ where: { id: currentUser.id } });
 
     if (!userWithPassword || !userWithPassword.password) {
       throw new Error("Không thể tìm thấy mật khẩu người dùng để so sánh.");
@@ -94,8 +93,9 @@ const resetPassword = async (data, currentUser) => {
       throw new Error("Vui lòng chọn mật khẩu khác với mật khẩu hiện tại.");
     }
 
-    await User.findByIdAndUpdate(currentUser._id, {
-      password: await hash(data.newPassword),
+    await prisma.user.update({
+      where: { id: currentUser.id },
+      data: { password: await hash(data.newPassword) },
     });
     return;
   }
@@ -105,28 +105,25 @@ const resetPassword = async (data, currentUser) => {
     throw new Error("userID or password is missing");
   }
 
-  const user = await User.findById(userId);
+  const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) {
     throw new Error("Invalid user");
   }
 
-  await User.findByIdAndUpdate(userId, { password: await hash(password) });
+  await prisma.user.update({ where: { id: userId }, data: { password: await hash(password) } });
 };
 
 const verifyEmail = async (token) => {
   try {
-    const { userId } = jwtService.verifyAccessToken(
-      token,
-      process.env.MAIL_JWT_SECRET
-    );
-    const user = await User.findById(userId);
+    const { userId } = jwtService.verifyAccessToken(token, process.env.MAIL_JWT_SECRET);
+    const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
       throw new Error("User không tồn tại");
     }
-    if (user.verified_at) {
+    if (user.verifiedAt) {
       return "verified";
     }
-    await User.findByIdAndUpdate(userId, { verified_at: new Date() });
+    await prisma.user.update({ where: { id: userId }, data: { verifiedAt: new Date() } });
   } catch (error) {
     throw new Error(error);
   }
@@ -141,19 +138,15 @@ const verifyToken = async (token) => {
 };
 
 const refreshAccessToken = async (refreshTokenString) => {
-  const refreshToken = await refreshTokenService.findValidRefreshToken(
-    refreshTokenString
-  );
+  const refreshToken = await refreshTokenService.findValidRefreshToken(refreshTokenString);
   if (!refreshToken) {
     throw new Error("Refresh token không hợp lệ");
   }
 
-  const tokenData = jwtService.generateAccessToken(refreshToken.user_id);
+  const tokenData = jwtService.generateAccessToken(refreshToken.userId);
   await refreshTokenService.deleteRefreshToken(refreshToken);
 
-  const newRefreshToken = await refreshTokenService.createRefreshToken(
-    refreshToken.user_id
-  );
+  const newRefreshToken = await refreshTokenService.createRefreshToken(refreshToken.userId);
 
   return {
     ...tokenData,

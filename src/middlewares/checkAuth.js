@@ -1,5 +1,5 @@
 const response = require("@/utils/response");
-const { User } = require("@/db/models");
+const prisma = require("@/db/prisma");
 const jwtService = require("@/service/jwt.service");
 
 async function checkAuth(req, res, next) {
@@ -12,7 +12,10 @@ async function checkAuth(req, res, next) {
 
     const payload = jwtService.verifyAccessToken(token);
 
-    const user = await User.findById(payload.userId);
+    const user = await prisma.user.findUnique({
+      where: { id: payload.userId },
+      include: { setting: true },
+    });
 
     if (!user) {
       return response.error(res, 401, "User không tồn tại");

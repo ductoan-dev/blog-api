@@ -1,4 +1,4 @@
-const { User } = require("@/db/models");
+const prisma = require("@/db/prisma");
 const jwtService = require("@/service/jwt.service");
 
 async function optionalAuth(req, res, next) {
@@ -7,7 +7,10 @@ async function optionalAuth(req, res, next) {
     if (!token) return next();
 
     const payload = jwtService.verifyAccessToken(token);
-    const user = await User.findById(payload.userId);
+    const user = await prisma.user.findUnique({
+      where: { id: payload.userId },
+      include: { setting: true },
+    });
     if (user) req.user = user;
   } catch {
     // token invalid — proceed as guest
