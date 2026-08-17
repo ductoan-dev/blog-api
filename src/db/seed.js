@@ -1,25 +1,10 @@
 require("module-alias/register");
 require("dotenv").config();
 
-const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
 const slugify = require("slugify");
 const { faker } = require("@faker-js/faker");
-const {
-  User,
-  Post,
-  Comment,
-  Like,
-  Tag,
-  Topic,
-  Bookmark,
-  Follow,
-  Conversation,
-  Message,
-  Notification,
-  RefreshToken,
-  Queue,
-} = require("@/db/models");
+const prisma = require("@/db/prisma");
 
 const TOPICS = [
   { name: "Technology", slug: "technology" },
@@ -31,16 +16,16 @@ const TOPICS = [
 
 const thumbUrl = (i) => `uploads/thumbnails/${(i % 10) + 1}.svg`;
 
-const TAGS = ["javascript", "nodejs", "react", "mongodb", "css", "ux", "tips", "tools"];
+const TAGS = ["javascript", "nodejs", "react", "postgresql", "css", "ux", "tips", "tools"];
 
 const POST_TITLES = [
-  "Getting Started with MongoDB and Mongoose",
+  "Getting Started with PostgreSQL and Prisma",
   "10 JavaScript Tips You Probably Didn't Know",
   "Building a REST API with Express and Node.js",
   "How to Design a Clean UI from Scratch",
   "My Journey from Junior to Senior Developer",
   "React Hooks: A Complete Guide for Beginners",
-  "Why I Switched from MySQL to MongoDB",
+  "Why I Switched from MongoDB to PostgreSQL",
   "CSS Grid vs Flexbox: When to Use Which",
   "How I Manage My Time as a Freelance Developer",
   "Understanding Async/Await in JavaScript",
@@ -48,7 +33,7 @@ const POST_TITLES = [
   "The Art of Writing Clean Code",
   "Setting Up CI/CD for Your Node.js App",
   "Lessons Learned After 3 Years of Full-Stack Dev",
-  "MongoDB Aggregation Pipeline: A Practical Guide",
+  "Prisma Migrations: A Practical Guide",
 ];
 
 function makeSlug(title, idx) {
@@ -63,56 +48,68 @@ function makeContent(title) {
 }
 
 async function seed() {
-  await mongoose.connect(process.env.MONGODB_URI);
-  console.log("Connected to MongoDB");
+  await prisma.message.deleteMany();
+  await prisma.conversation.deleteMany();
+  await prisma.notification.deleteMany();
+  await prisma.refreshToken.deleteMany();
+  await prisma.queue.deleteMany();
+  await prisma.bookmark.deleteMany();
+  await prisma.follow.deleteMany();
+  await prisma.like.deleteMany();
+  await prisma.comment.deleteMany();
+  await prisma.post.deleteMany();
+  await prisma.userSetting.deleteMany();
+  await prisma.tag.deleteMany();
+  await prisma.topic.deleteMany();
+  await prisma.user.deleteMany();
+  console.log("Cleared all tables");
 
-  await Promise.all([
-    User.deleteMany({}), Post.deleteMany({}), Comment.deleteMany({}),
-    Like.deleteMany({}), Tag.deleteMany({}), Topic.deleteMany({}),
-    Bookmark.deleteMany({}), Follow.deleteMany({}), Conversation.deleteMany({}),
-    Message.deleteMany({}), Notification.deleteMany({}),
-    RefreshToken.deleteMany({}), Queue.deleteMany({}),
-  ]);
-  console.log("Cleared all collections");
-
-  // --- Users ---
   const passwordHash = await bcrypt.hash("123456", 10);
 
-  const users = await User.insertMany([
-    {
-      first_name: "Alice", last_name: "Nguyen", email: "alice@example.com",
-      username: "alice", fullname: "Alice Nguyen", password: passwordHash,
-      avatar: `https://i.pravatar.cc/150?u=alice`, verified_at: new Date(),
-      title: "Full-Stack Developer", about: faker.lorem.sentences(2),
-    },
-    {
-      first_name: "Bob", last_name: "Tran", email: "bob@example.com",
-      username: "bob", fullname: "Bob Tran", password: passwordHash,
-      avatar: `https://i.pravatar.cc/150?u=bob`, verified_at: new Date(),
-      title: "UI/UX Designer", about: faker.lorem.sentences(2),
-    },
-    {
-      first_name: "Carol", last_name: "Le", email: "carol@example.com",
-      username: "carol", fullname: "Carol Le", password: passwordHash,
-      avatar: `https://i.pravatar.cc/150?u=carol`, verified_at: new Date(),
-      title: "Backend Engineer", about: faker.lorem.sentences(2),
-    },
+  const users = await Promise.all([
+    prisma.user.create({
+      data: {
+        firstName: "Alice", lastName: "Nguyen", email: "alice@example.com",
+        username: "alice", fullname: "Alice Nguyen", password: passwordHash,
+        avatar: `https://i.pravatar.cc/150?u=alice`, verifiedAt: new Date(),
+        title: "Full-Stack Developer", about: faker.lorem.sentences(2),
+      },
+    }),
+    prisma.user.create({
+      data: {
+        firstName: "Bob", lastName: "Tran", email: "bob@example.com",
+        username: "bob", fullname: "Bob Tran", password: passwordHash,
+        avatar: `https://i.pravatar.cc/150?u=bob`, verifiedAt: new Date(),
+        title: "UI/UX Designer", about: faker.lorem.sentences(2),
+      },
+    }),
+    prisma.user.create({
+      data: {
+        firstName: "Carol", lastName: "Le", email: "carol@example.com",
+        username: "carol", fullname: "Carol Le", password: passwordHash,
+        avatar: `https://i.pravatar.cc/150?u=carol`, verifiedAt: new Date(),
+        title: "Backend Engineer", about: faker.lorem.sentences(2),
+      },
+    }),
   ]);
   console.log(`Created ${users.length} users`);
 
-  // --- Topics ---
-  const topics = await Topic.insertMany(
-    TOPICS.map((t, i) => ({ ...t, image: thumbUrl(i), description: faker.lorem.sentence(), posts_count: 0 }))
+  const topics = await Promise.all(
+    TOPICS.map((t, i) =>
+      prisma.topic.create({
+        data: { ...t, image: thumbUrl(i), description: faker.lorem.sentence(), postsCount: 0 },
+      })
+    )
   );
   console.log(`Created ${topics.length} topics`);
 
-  // --- Tags ---
-  const tags = await Tag.insertMany(TAGS.map((name) => ({ name })));
+  const tags = await Promise.all(TAGS.map((name) => prisma.tag.create({ data: { name } })));
   console.log(`Created ${tags.length} tags`);
 
-  // --- Posts ---
   const usedSlugs = new Set();
-  const postsData = POST_TITLES.map((title, i) => {
+  const posts = [];
+  for (let i = 0; i < POST_TITLES.length; i++) {
+    const title = POST_TITLES[i];
     let slug = makeSlug(title, 0);
     let counter = 1;
     while (usedSlugs.has(slug)) slug = makeSlug(title, counter++);
@@ -122,123 +119,129 @@ async function seed() {
     const postTopics = faker.helpers.arrayElements(topics, faker.number.int({ min: 1, max: 2 }));
     const postTags = faker.helpers.arrayElements(tags, faker.number.int({ min: 1, max: 3 }));
 
-    return {
-      user_id: author._id,
-      title,
-      slug,
-      description: faker.lorem.sentences(2),
-      content: makeContent(title),
-      thumbnail: thumbUrl(i),
-      status: "published",
-      visibility: "public",
-      published_at: faker.date.recent({ days: 30 }),
-      views_count: faker.number.int({ min: 50, max: 2000 }),
-      likes_count: faker.number.int({ min: 0, max: 50 }),
-      topics: postTopics.map((t) => t._id),
-      tags: postTags.map((t) => t._id),
-    };
-  });
-
-  const posts = await Post.insertMany(postsData);
+    const post = await prisma.post.create({
+      data: {
+        userId: author.id,
+        title,
+        slug,
+        description: faker.lorem.sentences(2),
+        content: makeContent(title),
+        thumbnail: thumbUrl(i),
+        status: "published",
+        visibility: "public",
+        publishedAt: faker.date.recent({ days: 30 }),
+        viewsCount: faker.number.int({ min: 50, max: 2000 }),
+        likesCount: 0,
+        topics: { connect: postTopics.map((t) => ({ id: t.id })) },
+        tags: { connect: postTags.map((t) => ({ id: t.id })) },
+      },
+    });
+    posts.push(post);
+  }
   console.log(`Created ${posts.length} posts`);
 
-  // Cập nhật posts_count cho từng user
   for (const user of users) {
-    const count = posts.filter((p) => p.user_id.toString() === user._id.toString()).length;
-    await User.findByIdAndUpdate(user._id, { posts_count: count });
+    const count = posts.filter((p) => p.userId === user.id).length;
+    await prisma.user.update({ where: { id: user.id }, data: { postsCount: count } });
   }
-  // Cập nhật posts_count cho từng topic
   for (const topic of topics) {
-    const count = posts.filter((p) =>
-      p.topics.some((tid) => tid.toString() === topic._id.toString())
-    ).length;
-    await Topic.findByIdAndUpdate(topic._id, { posts_count: count });
+    const count = await prisma.post.count({ where: { topics: { some: { id: topic.id } } } });
+    await prisma.topic.update({ where: { id: topic.id }, data: { postsCount: count } });
   }
 
-  // --- Comments ---
-  const commentsData = [];
+  const comments = [];
   for (const post of posts.slice(0, 8)) {
     const commenters = faker.helpers.arrayElements(users, faker.number.int({ min: 1, max: 3 }));
     for (const commenter of commenters) {
-      commentsData.push({
-        user_id: commenter._id,
-        post_id: post._id,
-        content: faker.lorem.sentences(faker.number.int({ min: 1, max: 3 })),
-        like_count: faker.number.int({ min: 0, max: 10 }),
+      const comment = await prisma.comment.create({
+        data: {
+          userId: commenter.id,
+          postId: post.id,
+          content: faker.lorem.sentences(faker.number.int({ min: 1, max: 3 })),
+          likeCount: faker.number.int({ min: 0, max: 10 }),
+        },
       });
+      comments.push(comment);
     }
   }
-  const comments = await Comment.insertMany(commentsData);
   console.log(`Created ${comments.length} comments`);
 
-  // Một vài replies
-  const repliesData = [];
+  let replyCount = 0;
   for (const comment of comments.slice(0, 5)) {
-    repliesData.push({
-      user_id: users[faker.number.int({ min: 0, max: users.length - 1 })]._id,
-      post_id: comment.post_id,
-      parent_id: comment._id,
-      content: faker.lorem.sentence(),
+    const replier = users[faker.number.int({ min: 0, max: users.length - 1 })];
+    await prisma.comment.create({
+      data: {
+        userId: replier.id,
+        postId: comment.postId,
+        parentId: comment.id,
+        content: faker.lorem.sentence(),
+      },
     });
+    replyCount += 1;
   }
-  await Comment.insertMany(repliesData);
-  console.log(`Created ${repliesData.length} replies`);
+  console.log(`Created ${replyCount} replies`);
 
-  // --- Likes ---
-  const likesData = [];
+  let likeCount = 0;
   for (const post of posts) {
     const likers = faker.helpers.arrayElements(users, faker.number.int({ min: 0, max: users.length }));
     for (const liker of likers) {
-      likesData.push({ user_id: liker._id, likeable_type: "Post", likeable_id: post._id });
+      await prisma.like.create({
+        data: { userId: liker.id, likeableType: "Post", likeableId: post.id },
+      }).catch(() => {});
+      likeCount += 1;
     }
+    await prisma.post.update({
+      where: { id: post.id },
+      data: { likesCount: likers.length },
+    });
+    await prisma.user.update({
+      where: { id: post.userId },
+      data: { likesCount: { increment: likers.length } },
+    });
   }
-  if (likesData.length) await Like.insertMany(likesData, { ordered: false }).catch(() => {});
-  console.log(`Created ${likesData.length} likes`);
+  console.log(`Created ${likeCount} likes`);
 
-  // --- Bookmarks ---
-  const bookmarksData = [];
   for (const user of users) {
     const saved = faker.helpers.arrayElements(posts, faker.number.int({ min: 1, max: 4 }));
     for (const post of saved) {
-      bookmarksData.push({ user_id: user._id, post_id: post._id });
+      await prisma.bookmark.create({ data: { userId: user.id, postId: post.id } }).catch(() => {});
     }
   }
-  await Bookmark.insertMany(bookmarksData, { ordered: false }).catch(() => {});
-  console.log(`Created bookmarks`);
+  console.log("Created bookmarks");
 
-  // --- Follows ---
-  await Follow.create({ follower_id: users[0]._id, following_id: users[1]._id });
-  await Follow.create({ follower_id: users[1]._id, following_id: users[2]._id });
-  await Follow.create({ follower_id: users[2]._id, following_id: users[0]._id });
-  await User.findByIdAndUpdate(users[0]._id, { following_count: 1, follower_count: 1 });
-  await User.findByIdAndUpdate(users[1]._id, { following_count: 1, follower_count: 1 });
-  await User.findByIdAndUpdate(users[2]._id, { following_count: 1, follower_count: 1 });
+  await prisma.follow.create({ data: { followerId: users[0].id, followingId: users[1].id } });
+  await prisma.follow.create({ data: { followerId: users[1].id, followingId: users[2].id } });
+  await prisma.follow.create({ data: { followerId: users[2].id, followingId: users[0].id } });
+  for (const user of users) {
+    await prisma.user.update({ where: { id: user.id }, data: { followingCount: 1, followerCount: 1 } });
+  }
   console.log("Created follows");
 
-  // --- Conversation + Messages ---
-  const conv = await Conversation.create({
-    name: "Alice & Bob", created_by: users[0]._id, members: [users[0]._id, users[1]._id],
-    last_message_at: new Date(),
+  const conv = await prisma.conversation.create({
+    data: {
+      name: "Alice & Bob",
+      createdBy: users[0].id,
+      lastMessageAt: new Date(),
+      members: { connect: [{ id: users[0].id }, { id: users[1].id }] },
+    },
   });
-  await Message.insertMany([
-    { user_id: users[0]._id, conversation_id: conv._id, content: "Hey, check out my new post!" },
-    { user_id: users[1]._id, conversation_id: conv._id, content: "Looks great, very well written!" },
-    { user_id: users[0]._id, conversation_id: conv._id, content: "Thanks! Working on part 2 now." },
-  ]);
+  await prisma.message.create({ data: { userId: users[0].id, conversationId: conv.id, content: "Hey, check out my new post!" } });
+  await prisma.message.create({ data: { userId: users[1].id, conversationId: conv.id, content: "Looks great, very well written!" } });
+  await prisma.message.create({ data: { userId: users[0].id, conversationId: conv.id, content: "Thanks! Working on part 2 now." } });
   console.log("Created conversation & messages");
 
   console.log("\n✅ Seed xong!");
   console.log("─────────────────────────────");
   console.log(`👤 Users   : ${users.length} (password: 123456)`);
   console.log(`📝 Posts   : ${posts.length}`);
-  console.log(`💬 Comments: ${comments.length + repliesData.length}`);
-  console.log(`❤️  Likes   : ${likesData.length}`);
+  console.log(`💬 Comments: ${comments.length + replyCount}`);
+  console.log(`❤️  Likes   : ${likeCount}`);
   console.log(`🏷  Topics  : ${topics.length}`);
   console.log(`🔖 Tags    : ${tags.length}`);
   console.log("─────────────────────────────");
   users.forEach((u) => console.log(`  ${u.email}  /  123456`));
 
-  await mongoose.disconnect();
+  await prisma.$disconnect();
 }
 
 seed().catch((err) => {
