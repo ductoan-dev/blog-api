@@ -1,30 +1,32 @@
-const { Conversation, Message } = require("@/db/models");
+const prisma = require("@/db/prisma");
+const { serializeUser } = require("@/utils/serializers");
 
-const USER_SELECT = "id avatar username fullname first_name last_name";
+const USER_SELECT = { id: true, avatar: true, username: true, fullname: true, firstName: true, lastName: true };
 
 class MessengerService {
   async getConversations(currentUser) {
-    const conversations = await Conversation.find({ members: currentUser._id })
-      .populate("members", USER_SELECT)
-      .sort({ last_message_at: -1 })
-      .lean();
+    const conversations = await prisma.conversation.findMany({
+      where: { members: { some: { id: currentUser.id } } },
+      include: { members: { select: USER_SELECT } },
+      orderBy: { lastMessageAt: "desc" },
+    });
 
     return Promise.all(
       conversations.map(async (conv) => {
-        const lastMsg = await Message.findOne({
-          conversation_id: conv._id,
-          deleted_at: null,
-        })
-          .populate("user_id", USER_SELECT)
-          .sort({ createdAt: -1 })
-          .lean();
+        const lastMsg = await prisma.message.findFirst({
+          where: { conversationId: conv.id, deletedAt: null },
+          include: { user: { select: USER_SELECT } },
+          orderBy: { createdAt: "desc" },
+        });
 
         return {
-          ...conv,
-          id: conv._id.toString(),
-          members: conv.members.map((m) => ({ ...m, id: m._id.toString() })),
+          id: conv.id,
+          name: conv.name,
+          avatar: conv.avatar,
+          last_message_at: conv.lastMessageAt,
+          members: conv.members.map(serializeUser),
           last_message: lastMsg
-            ? { ...lastMsg, id: lastMsg._id.toString(), user: lastMsg.user_id }
+            ? { id: lastMsg.id, content: lastMsg.content, createdAt: lastMsg.createdAt, user: serializeUser(lastMsg.user) }
             : null,
         };
       })
@@ -32,81 +34,96 @@ class MessengerService {
   }
 
   async getMessages(conversationId, currentUser) {
-    const conv = await Conversation.findOne({
-      _id: conversationId,
-      members: currentUser._id,
+    const conv = await prisma.conversation.findFirst({
+      where: { id: conversationId, members: { some: { id: currentUser.id } } },
     });
     if (!conv) throw new Error("Conversation not found");
 
-    const messages = await Message.find({
-      conversation_id: conversationId,
-      deleted_at: null,
-    })
-      .populate("user_id", USER_SELECT)
-      .sort({ createdAt: 1 })
-      .lean();
+    const messages = await prisma.message.findMany({
+      where: { conversationId, deletedAt: null },
+      include: { user: { select: USER_SELECT } },
+      orderBy: { createdAt: "asc" },
+    });
 
     return messages.map((m) => ({
-      ...m,
-      id: m._id.toString(),
-      user: m.user_id,
+      id: m.id,
+      content: m.content,
+      type: m.type,
+      createdAt: m.createdAt,
+      user: serializeUser(m.user),
     }));
   }
 
   async sendMessage(conversationId, currentUser, content) {
-    const conv = await Conversation.findOne({
-      _id: conversationId,
-      members: currentUser._id,
+    const conv = await prisma.conversation.findFirst({
+      where: { id: conversationId, members: { some: { id: currentUser.id } } },
     });
     if (!conv) throw new Error("Conversation not found");
 
-    const message = await Message.create({
-      conversation_id: conversationId,
-      user_id: currentUser._id,
-      type: "text",
-      content,
+    const message = await prisma.message.create({
+      data: { conversationId, userId: currentUser.id, type: "text", content },
     });
 
-    await Conversation.findByIdAndUpdate(conversationId, {
-      last_message_at: new Date(),
+    await prisma.conversation.update({
+      where: { id: conversationId },
+      data: { lastMessageAt: new Date() },
     });
 
-    const populated = await Message.findById(message._id)
-      .populate("user_id", USER_SELECT)
-      .lean();
+    const populated = await prisma.message.findUnique({
+      where: { id: message.id },
+      include: { user: { select: USER_SELECT } },
+    });
 
-    return { ...populated, id: populated._id.toString(), user: populated.user_id };
+    return {
+      id: populated.id,
+      content: populated.content,
+      type: populated.type,
+      createdAt: populated.createdAt,
+      user: serializeUser(populated.user),
+    };
   }
 
   async getOrCreateDirect(currentUser, targetUserId) {
-    const existing = await Conversation.findOne({
-      members: { $all: [currentUser._id, targetUserId], $size: 2 },
-    })
-      .populate("members", USER_SELECT)
-      .lean();
+    const existing = await prisma.conversation.findFirst({
+      where: {
+        AND: [
+          { members: { some: { id: currentUser.id } } },
+          { members: { some: { id: targetUserId } } },
+          { members: { every: { id: { in: [currentUser.id, targetUserId] } } } },
+        ],
+      },
+      include: { members: { select: USER_SELECT } },
+    });
 
     if (existing) {
       return {
-        ...existing,
-        id: existing._id.toString(),
-        members: existing.members.map((m) => ({ ...m, id: m._id.toString() })),
+        id: existing.id,
+        name: existing.name,
+        avatar: existing.avatar,
+        last_message_at: existing.lastMessageAt,
+        members: existing.members.map(serializeUser),
       };
     }
 
-    const conv = await Conversation.create({
-      created_by: currentUser._id,
-      members: [currentUser._id, targetUserId],
-      last_message_at: new Date(),
+    const conv = await prisma.conversation.create({
+      data: {
+        createdBy: currentUser.id,
+        lastMessageAt: new Date(),
+        members: { connect: [{ id: currentUser.id }, { id: targetUserId }] },
+      },
     });
 
-    const populated = await Conversation.findById(conv._id)
-      .populate("members", USER_SELECT)
-      .lean();
+    const populated = await prisma.conversation.findUnique({
+      where: { id: conv.id },
+      include: { members: { select: USER_SELECT } },
+    });
 
     return {
-      ...populated,
-      id: populated._id.toString(),
-      members: populated.members.map((m) => ({ ...m, id: m._id.toString() })),
+      id: populated.id,
+      name: populated.name,
+      avatar: populated.avatar,
+      last_message_at: populated.lastMessageAt,
+      members: populated.members.map(serializeUser),
     };
   }
 }
