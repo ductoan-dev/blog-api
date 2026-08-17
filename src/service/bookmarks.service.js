@@ -25,7 +25,7 @@ class BookmarksService {
     if (!Array.isArray(ids) || ids.length === 0)
       throw new Error("No bookmark IDs provided");
 
-    return prisma.bookmark.deleteMany({ where: { id: { in: ids } } });
+    return prisma.bookmark.deleteMany({ where: { id: { in: ids }, userId: currentUser.id } });
   }
 }
 

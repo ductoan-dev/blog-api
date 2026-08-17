@@ -43,4 +43,17 @@ describe("bookmarks.service", () => {
     expect(remaining).toHaveLength(1);
     expect(remaining[0].postId).toBe(post2.id);
   });
+
+  it("remove does not delete bookmarks belonging to another user (IDOR)", async () => {
+    const owner = await createUser();
+    const attacker = await createUser();
+    const post = await createPost(owner.id);
+    const ownerBookmark = await prisma.bookmark.create({ data: { userId: owner.id, postId: post.id } });
+
+    const result = await bookmarksService.remove(attacker, [ownerBookmark.id]);
+
+    expect(result.count).toBe(0);
+    const stillThere = await prisma.bookmark.findUnique({ where: { id: ownerBookmark.id } });
+    expect(stillThere).not.toBeNull();
+  });
 });

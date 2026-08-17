@@ -33,6 +33,21 @@ describe("user.service", () => {
     expect(bobFinal.followerCount).toBe(0);
   });
 
+  it("toggleFollow enqueues sendNewFollowerJob with bare ids only, no password/twoFactorSecret", async () => {
+    const alice = await createUser({ username: "alice-queue" });
+    const bob = await createUser({ username: "bob-queue" });
+    await prisma.userSetting.create({
+      data: { userId: bob.id, data: { emailNewFollowers: true } },
+    });
+
+    await userService.toggleFollow(alice, bob.id);
+
+    const job = await prisma.queue.findFirst({ where: { type: "sendNewFollowerJob" } });
+    expect(job).not.toBeNull();
+    expect(job.payload).toEqual({ followingId: bob.id, followerId: alice.id });
+    expect(JSON.stringify(job.payload)).not.toMatch(/password|twoFactorSecret/i);
+  });
+
   it("getUserByUsername returns a limited profile when the viewer cannot see it", async () => {
     const owner = await createUser({ username: "private-owner" });
     await prisma.userSetting.create({
@@ -61,7 +76,20 @@ describe("user.service", () => {
       privacy: JSON.stringify({ ignored: true }),
     }, user);
 
-    expect(updated.websiteUrl).toBe("https://example.com");
+    expect(updated.website_url).toBe("https://example.com");
+  });
+
+  it("editProfile returns a serialized (snake_case) user and never leaks password/twoFactorSecret", async () => {
+    const user = await createUser();
+    const updated = await userService.editProfile(null, { title: "New title" }, user);
+
+    expect(updated.title).toBe("New title");
+    expect(updated.password).toBeUndefined();
+    expect(updated.twoFactorSecret).toBeUndefined();
+    expect(updated.two_factor_secret).toBeUndefined();
+    // sanity check that it went through serializeUser's snake_case shape
+    expect(updated.first_name).toBe("Test");
+    expect(updated.firstName).toBeUndefined();
   });
 
   it("getUserByUsername's full-profile branch returns a serialized (snake_case) user, not a raw Prisma row", async () => {

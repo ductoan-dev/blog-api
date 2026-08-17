@@ -154,7 +154,7 @@ class UserService {
         await prisma.queue.create({
           data: {
             type: "sendNewFollowerJob",
-            payload: { following: userFollower, follower: currentUser },
+            payload: { followingId: userFollower.id, followerId: currentUser.id },
           },
         });
       }
@@ -229,7 +229,8 @@ class UserService {
     }
 
     try {
-      return await prisma.user.update({ where: { id: currentUser.id }, data: updateData });
+      const updated = await prisma.user.update({ where: { id: currentUser.id }, data: updateData });
+      return serializeUser(updated);
     } catch (error) {
       throw new Error(error);
     }
