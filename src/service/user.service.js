@@ -1,4 +1,4 @@
-const { User, Queue, Follow } = require("@/db/models");
+const prisma = require("@/db/prisma");
 const emitter = require("@/utils/emitter");
 const notificationService = require("@/service/notification.service");
 
@@ -7,11 +7,11 @@ const isEmail = (value) =>
 
 class UserService {
   async getAllUser() {
-    return await User.find();
+    return prisma.user.findMany();
   }
 
   async getUserById(id) {
-    return await User.findById(id);
+    return prisma.user.findUnique({ where: { id } });
   }
 
   canUserViewProfile(currentUser, targetUser, followerIds = []) {
@@ -21,7 +21,7 @@ class UserService {
       return { canView: profileVisibility === "public", type: profileVisibility };
     }
 
-    if (targetUser._id.toString() === currentUser._id.toString()) {
+    if (targetUser.id === currentUser.id) {
       return { canView: true, type: "self" };
     }
 
@@ -44,23 +44,17 @@ class UserService {
   }
 
   getUserProfileVisibility(user) {
-    try {
-      if (user.settings && user.settings.data) {
-        const settingsData = JSON.parse(user.settings.data);
-        return settingsData.profileVisibility || "public";
-      }
-      return "public";
-    } catch (error) {
-      console.log("Error parsing user settings:", error);
-      return "public";
-    }
+    return user.setting?.data?.profileVisibility || "public";
   }
 
   async getUserFollowingIds(currentUser) {
+    if (!currentUser) return [];
     try {
-      if (!currentUser) return [];
-      const follows = await Follow.find({ follower_id: currentUser._id }).select("following_id");
-      return follows.map((f) => f.following_id.toString());
+      const follows = await prisma.follow.findMany({
+        where: { followerId: currentUser.id },
+        select: { followingId: true },
+      });
+      return follows.map((f) => f.followingId);
     } catch (error) {
       console.log(error);
       return [];
@@ -68,91 +62,100 @@ class UserService {
   }
 
   async getUserByUsername(username, currentUser = null) {
-    try {
-      const user = await User.findOne({ username });
+    const user = await prisma.user.findUnique({
+      where: { username },
+      include: { setting: true },
+    });
 
-      if (!user) throw new Error("User does not exist");
+    if (!user) throw new Error("User does not exist");
 
-      const followerDocs = await Follow.find({ following_id: user._id }).select("follower_id");
-      const followerIds = followerDocs.map((f) => f.follower_id.toString());
+    const followerDocs = await prisma.follow.findMany({
+      where: { followingId: user.id },
+      select: { followerId: true },
+    });
+    const followerIds = followerDocs.map((f) => f.followerId);
 
-      const result = this.canUserViewProfile(currentUser, user, followerIds);
+    const result = this.canUserViewProfile(currentUser, user, followerIds);
 
-      if (!result.canView) {
-        return {
-          id: user.id,
-          username: user.username,
-          title: user.title,
-          avatar: user.avatar,
-          canView: false,
-          type: result.type,
-          follower_count: user.follower_count,
-          following_count: user.following_count,
-        };
-      }
-
-      return user;
-    } catch (error) {
-      throw error;
+    if (!result.canView) {
+      return {
+        id: user.id,
+        username: user.username,
+        title: user.title,
+        avatar: user.avatar,
+        canView: false,
+        type: result.type,
+        follower_count: user.followerCount,
+        following_count: user.followingCount,
+      };
     }
+
+    const { password, twoFactorSecret, ...safeUser } = user;
+    return safeUser;
   }
 
   async toggleFollow(currentUser, userId) {
     if (!currentUser) throw new Error("Bạn phải đăng nhập để follow");
-    if (currentUser._id.toString() === userId.toString())
-      throw new Error("You cannot follow yourself");
+    if (currentUser.id === userId) throw new Error("You cannot follow yourself");
 
-    const userFollowing = await User.findById(currentUser._id);
-    const userFollower = await User.findById(userId);
-
+    const userFollower = await prisma.user.findUnique({
+      where: { id: userId },
+      include: { setting: true },
+    });
     if (!userFollower) throw new Error("User not found");
 
-    const existingFollow = await Follow.findOne({
-      follower_id: currentUser._id,
-      following_id: userId,
+    const existingFollow = await prisma.follow.findFirst({
+      where: { followerId: currentUser.id, followingId: userId },
     });
 
     if (existingFollow) {
-      await existingFollow.deleteOne();
-      userFollowing.following_count = Math.max(0, (userFollowing.following_count ?? 0) - 1);
-      userFollower.follower_count = Math.max(0, (userFollower.follower_count ?? 0) - 1);
-      await userFollower.save();
-      await userFollowing.save();
+      await prisma.follow.delete({ where: { id: existingFollow.id } });
+      await prisma.user.update({
+        where: { id: currentUser.id },
+        data: { followingCount: { decrement: 1 } },
+      });
+      await prisma.user.update({
+        where: { id: userId },
+        data: { followerCount: { decrement: 1 } },
+      });
       return false;
     }
 
-    await Follow.create({ follower_id: currentUser._id, following_id: userId });
-    userFollower.follower_count = (userFollower.follower_count ?? 0) + 1;
-    userFollowing.following_count = (userFollowing.following_count ?? 0) + 1;
-    await userFollower.save();
-    await userFollowing.save();
+    await prisma.follow.create({ data: { followerId: currentUser.id, followingId: userId } });
+    await prisma.user.update({
+      where: { id: userId },
+      data: { followerCount: { increment: 1 } },
+    });
+    await prisma.user.update({
+      where: { id: currentUser.id },
+      data: { followingCount: { increment: 1 } },
+    });
 
-    // Create follow notification for the person being followed (userFollower)
     try {
-      const followerName = userFollowing.fullname ||
-        [userFollowing.first_name, userFollowing.last_name].filter(Boolean).join(" ") ||
-        userFollowing.username;
+      const followerName =
+        currentUser.fullname ||
+        [currentUser.firstName, currentUser.lastName].filter(Boolean).join(" ") ||
+        currentUser.username;
       const notif = await notificationService.create({
-        userId: userFollower._id,
+        userId: userFollower.id,
         type: "follow",
         title: `${followerName} đã theo dõi bạn`,
         notifiableType: "User",
-        notifiableId: userFollowing._id,
-        messageLink: `/profile/${userFollowing.username}`,
+        notifiableId: currentUser.id,
+        messageLink: `/profile/${currentUser.username}`,
       });
-      emitter.emit("notification:follow", { toUserId: userFollower._id.toString(), notification: notif });
+      emitter.emit("notification:follow", { toUserId: userFollower.id, notification: notif });
     } catch (error) {
       console.log("Follow notification error:", error);
     }
 
     try {
-      const settings = userFollower.settings?.data
-        ? JSON.parse(userFollower.settings.data)
-        : {};
-      if (settings.emailNewFollowers) {
-        await Queue.create({
-          type: "sendNewFollowerJob",
-          payload: { following: userFollower.toObject(), follower: userFollowing.toObject() },
+      if (userFollower.setting?.data?.emailNewFollowers) {
+        await prisma.queue.create({
+          data: {
+            type: "sendNewFollowerJob",
+            payload: { following: userFollower, follower: currentUser },
+          },
         });
       }
     } catch (error) {
@@ -163,25 +166,26 @@ class UserService {
   }
 
   async getFollowersList(userId) {
-    const follows = await Follow.find({ following_id: userId })
-      .populate("follower_id", "id _id username fullname first_name last_name avatar title")
-      .lean();
-    return follows.map((f) => ({ ...f.follower_id, id: f.follower_id._id.toString() }));
+    const follows = await prisma.follow.findMany({
+      where: { followingId: userId },
+      include: { follower: true },
+    });
+    return follows.map((f) => f.follower);
   }
 
   async getFollowingList(userId) {
-    const follows = await Follow.find({ follower_id: userId })
-      .populate("following_id", "id _id username fullname first_name last_name avatar title")
-      .lean();
-    return follows.map((f) => ({ ...f.following_id, id: f.following_id._id.toString() }));
+    const follows = await prisma.follow.findMany({
+      where: { followerId: userId },
+      include: { following: true },
+    });
+    return follows.map((f) => f.following);
   }
 
   async checkFollowing(currentUser, userId) {
     if (!currentUser) throw new Error("Bạn phải đăng nhập để follow");
 
-    const follow = await Follow.findOne({
-      follower_id: currentUser._id,
-      following_id: userId,
+    const follow = await prisma.follow.findFirst({
+      where: { followerId: currentUser.id, followingId: userId },
     });
 
     return !!follow;
@@ -196,13 +200,36 @@ class UserService {
       updateData.avatar = avatarOrCoverPath.avatar[0].path.replace(/\\/g, "/");
     }
     if (avatarOrCoverPath?.cover_image?.[0]?.path) {
-      updateData.cover_image = avatarOrCoverPath.cover_image[0].path.replace(/\\/g, "/");
+      updateData.coverImage = avatarOrCoverPath.cover_image[0].path.replace(/\\/g, "/");
     }
 
-    const newData = { ...updateData, ...data };
+    // Prisma throws on unknown keys (unlike Mongoose, which silently drops
+    // fields with no matching schema path) — map explicitly instead of
+    // spreading the raw multipart body.
+    const allowedFields = {
+      fullname: "fullname",
+      first_name: "firstName",
+      last_name: "lastName",
+      username: "username",
+      title: "title",
+      about: "about",
+      location: "location",
+      address: "address",
+      website_url: "websiteUrl",
+      twitter_url: "twitterUrl",
+      github_url: "githubUrl",
+      linkedin_url: "linkedinUrl",
+      skills: "skills",
+    };
+
+    for (const [bodyKey, prismaField] of Object.entries(allowedFields)) {
+      if (data[bodyKey] !== undefined) {
+        updateData[prismaField] = data[bodyKey];
+      }
+    }
 
     try {
-      return await User.findByIdAndUpdate(currentUser._id, newData, { new: true });
+      return await prisma.user.update({ where: { id: currentUser.id }, data: updateData });
     } catch (error) {
       throw new Error(error);
     }
@@ -216,33 +243,46 @@ class UserService {
       if (email && !isEmail(email)) {
         throw new Error("Invalid email address");
       }
-      await User.findByIdAndUpdate(currentUser._id, { verified_at: null, email });
+      await prisma.user.update({
+        where: { id: currentUser.id },
+        data: { verifiedAt: null, email },
+      });
 
-      await Queue.create({
-        type: "sendVerifyEmailJob",
-        payload: { userId: currentUser._id.toString() },
+      await prisma.queue.create({
+        data: {
+          type: "sendVerifyEmailJob",
+          payload: { userId: currentUser.id },
+        },
       });
     }
 
-    await User.findByIdAndUpdate(currentUser._id, {
-      settings: { data: JSON.stringify(settings) },
+    await prisma.userSetting.upsert({
+      where: { userId: currentUser.id },
+      create: { userId: currentUser.id, data: settings },
+      update: { data: settings },
     });
   }
 
   async search(query) {
-    const regex = new RegExp(query, "i");
-    const users = await User.find({
-      $or: [
-        { username: regex },
-        { fullname: regex },
-        { first_name: regex },
-        { last_name: regex },
-      ],
-    })
-      .select("id avatar username fullname first_name last_name title")
-      .lean();
-
-    return users.map((u) => ({ ...u, id: u._id.toString() }));
+    return prisma.user.findMany({
+      where: {
+        OR: [
+          { username: { contains: query, mode: "insensitive" } },
+          { fullname: { contains: query, mode: "insensitive" } },
+          { firstName: { contains: query, mode: "insensitive" } },
+          { lastName: { contains: query, mode: "insensitive" } },
+        ],
+      },
+      select: {
+        id: true,
+        avatar: true,
+        username: true,
+        fullname: true,
+        firstName: true,
+        lastName: true,
+        title: true,
+      },
+    });
   }
 }
 
