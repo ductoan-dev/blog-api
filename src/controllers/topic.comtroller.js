@@ -28,8 +28,12 @@ const getBySlug = async (req, res) => {
 };
 
 const create = async (req, res) => {
-  const topic = await topicService.create(req.body);
-  res.json(topic);
+  try {
+    const topic = await topicService.create(req.body);
+    response.succsess(res, 201, topic);
+  } catch (error) {
+    response.error(res, 400, error.message);
+  }
 };
 
 const update = async (req, res) => {

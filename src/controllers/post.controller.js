@@ -2,13 +2,12 @@ const response = require("@/utils/response");
 const postService = require("@/service/post.service");
 
 const index = async (req, res) => {
-  const { posts } = await postService.getAll();
-
+  const { posts } = await postService.getAll(req.user);
   response.succsess(res, 200, posts);
 };
 const getBySlug = async (req, res) => {
   try {
-    const post = await postService.getBySlug(req.params.slug);
+    const post = await postService.getBySlug(req.params.slug, req.user);
     if (!post) {
       return res.status(404).json({
         success: false,
@@ -77,6 +76,26 @@ const getByUserName = async (req, res) => {
     response.error(res, 400, error.message);
   }
 };
+const search = async (req, res) => {
+  try {
+    const q = (req.query.q || "").trim();
+    if (!q) return response.succsess(res, 200, []);
+    const posts = await postService.search(q, req.user);
+    response.succsess(res, 200, posts);
+  } catch (error) {
+    response.error(res, 400, error.message);
+  }
+};
+
+const getFollowingFeed = async (req, res) => {
+  try {
+    const posts = await postService.getFollowingFeed(req.user);
+    response.succsess(res, 200, posts);
+  } catch (error) {
+    response.error(res, 400, error.message);
+  }
+};
+
 const viewsCount = async (req, res) => {
   try {
     const post = await postService.viewsCount(req.params.id);
@@ -113,12 +132,14 @@ const remove = async (req, res) => {
 
 module.exports = {
   index,
+  search,
   getBySlug,
   getListByMe,
   getRelatedPosts,
   getByTopicId,
   getListByUserId,
   getByUserName,
+  getFollowingFeed,
   viewsCount,
   toggleLike,
   update,

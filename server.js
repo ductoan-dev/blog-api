@@ -1,18 +1,26 @@
 require("module-alias/register");
 require("dotenv").config();
+const http = require("http");
 const express = require("express");
 const cors = require("cors");
-const { sequelize } = require("./src/db/models");
+const mongoose = require("mongoose");
 const path = require("path");
+const { Server } = require("socket.io");
 const router = require("@/routes/api");
 const app = express();
 
 const errorHandler = require("@/middlewares/errors/errorHandler");
 const notFoudHandler = require("@/middlewares/errors/notFoundHandler");
-// cors
-app.use(cors());
 
-// cau hình router đến public
+mongoose
+  .connect(process.env.MONGODB_URI)
+  .then(() => console.log("MongoDB connected"))
+  .catch((err) => {
+    console.error("MongoDB connection error:", err);
+    process.exit(1);
+  });
+
+app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static("public"));
@@ -23,6 +31,14 @@ app.use("/api/v1", router);
 app.use(notFoudHandler);
 app.use(errorHandler);
 
-app.listen(3000, () => {
-  console.log("hello");
+const server = http.createServer(app);
+
+const io = new Server(server, {
+  cors: { origin: "*" },
+});
+
+require("@/socket")(io);
+
+server.listen(3000, () => {
+  console.log("Server running on port 3000");
 });

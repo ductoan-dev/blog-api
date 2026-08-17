@@ -6,6 +6,13 @@ const checkAuth = require("@/middlewares/checkAuth");
 const upload = require("@/middlewares/upload");
 
 router.get("/follow/:userId", checkAuth, userController.checkFollowing);
+router.get("/:userId/followers", userController.getFollowersList);
+router.get("/:userId/following", userController.getFollowingList);
+
+
+//search user 
+router.get("/search", userController.search);
+
 
 router.get("/:username", checkAuth, userController.getUserByUsername);
 router.post("/follow/:userId", checkAuth, userController.toggleFollow);

@@ -1,5 +1,5 @@
 const response = require("@/utils/response");
-const { User, UserSetting } = require("@/db/models");
+const { User } = require("@/db/models");
 const jwtService = require("@/service/jwt.service");
 
 async function checkAuth(req, res, next) {
@@ -12,23 +12,7 @@ async function checkAuth(req, res, next) {
 
     const payload = jwtService.verifyAccessToken(token);
 
-    const user = await User.findOne({
-      // attributes: [
-      //   "id",
-      //   "email",
-      //   "avatar",
-      //   "first_name",
-      //   "last_name",
-      //   "username",
-      //   "created_at",
-      // ],
-      where: { id: payload.userId },
-      include: {
-        model: UserSetting,
-        as: "settings",
-        required: false,
-      },
-    });
+    const user = await User.findById(payload.userId);
 
     if (!user) {
       return response.error(res, 401, "User không tồn tại");

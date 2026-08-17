@@ -1,7 +1,4 @@
-const { where } = require("sequelize");
-
 const { User, Queue } = require("@/db/models");
-const { Op } = require("sequelize");
 const { hash, compare } = require("@/utils/bcrypt");
 const jwtService = require("@/service/jwt.service");
 const refreshTokenService = require("@/service/refreshToken.service");
@@ -14,16 +11,13 @@ const register = async (data) => {
     last_name: data.last_name,
   });
 
-  const userId = user.id;
+  const userId = user._id;
   const token = jwtService.generateAccessToken(userId);
-  return {
-    userId,
-    token,
-  };
+  return { userId, token };
 };
 
 const login = async ({ email, password }) => {
-  const user = await User.findOne({ where: { email }, raw: true });
+  const user = await User.findOne({ email }).lean();
 
   if (!user) {
     throw new Error("Thông tin đăng nhập không hợp lệ");
@@ -34,8 +28,8 @@ const login = async ({ email, password }) => {
     throw new Error("Thông tin đăng nhập không hợp lệ");
   }
 
-  const tokenData = jwtService.generateAccessToken(user.id);
-  const refreshToken = await refreshTokenService.createRefreshToken(user.id);
+  const tokenData = jwtService.generateAccessToken(user._id);
+  const refreshToken = await refreshTokenService.createRefreshToken(user._id);
   return {
     ...tokenData,
     refresh_token: refreshToken.token,
@@ -47,17 +41,11 @@ const getProfile = async (fullname) => {
   const lastName = rest.join(" ");
 
   const user = await User.findOne({
-    where: {
-      [Op.and]: [
-        { first_name: { [Op.iLike]: `%${firstName}%` } },
-        { last_name: { [Op.iLike]: `%${lastName}%` } },
-      ],
-    },
-    attributes: {
-      exclude: ["password", "refresh_token"],
-    },
-    raw: true,
-  });
+    first_name: { $regex: firstName, $options: "i" },
+    last_name: { $regex: lastName, $options: "i" },
+  })
+    .select("-password")
+    .lean();
 
   if (!user) {
     const error = new Error("Không tìm thấy người dùng");
@@ -67,77 +55,62 @@ const getProfile = async (fullname) => {
 
   return user;
 };
+
 const forGotPassWord = async (email) => {
-  const user = await User.findOne({ where: { email } });
+  const user = await User.findOne({ email });
 
   if (!user) {
     throw new Error("Không tìm thấy người dùng với email này");
   }
 
-  await User.update({ verified_at: null }, { where: { id: user.id } });
+  await User.findByIdAndUpdate(user._id, { verified_at: null });
   await Queue.create({
     type: "sendVerifyEmailJob",
-    payload: { userId: user.id },
+    payload: { userId: user._id.toString() },
   });
 };
 
 const resetPassword = async (data, currentUser) => {
-  if (currentUser && currentUser.id) {
-    let user = currentUser;
+  if (currentUser && currentUser._id) {
+    const userWithPassword = await User.findById(currentUser._id).select(
+      "_id password"
+    );
 
-    // Luôn tìm lại người dùng để đảm bảo có mật khẩu từ DB
-    const userWithPassword = await User.findOne({
-      where: { id: currentUser.id },
-      attributes: ["id", "password"],
-    });
-
-    // Kiểm tra xem người dùng có tồn tại và có mật khẩu hay không
     if (!userWithPassword || !userWithPassword.password) {
       throw new Error("Không thể tìm thấy mật khẩu người dùng để so sánh.");
     }
 
-    // Gán lại user để dùng cho các bước tiếp theo
-    user = userWithPassword;
-
-    // ... các đoạn code tiếp theo không thay đổi
     if (!data.currentPassword) {
       throw new Error("Vui lòng nhập mật khẩu hiện tại.");
     }
 
-    const isValid = await compare(data.currentPassword, user.password);
+    const isValid = await compare(data.currentPassword, userWithPassword.password);
     if (!isValid) {
       throw new Error("Mật khẩu hiện tại bạn đã nhập không đúng.");
     }
 
-    const isSameAsOld = await compare(data.newPassword, user.password);
+    const isSameAsOld = await compare(data.newPassword, userWithPassword.password);
     if (isSameAsOld) {
       throw new Error("Vui lòng chọn mật khẩu khác với mật khẩu hiện tại.");
     }
 
-    await User.update(
-      { password: await hash(data.newPassword) },
-      { where: { id: user.id } }
-    );
-
+    await User.findByIdAndUpdate(currentUser._id, {
+      password: await hash(data.newPassword),
+    });
     return;
   }
 
-  // Trường hợp reset qua email (forgot password)
   const { userId, password } = data;
-
   if (!userId || !password) {
     throw new Error("userID or password is missing");
   }
 
-  const user = await User.findOne({ where: { id: userId } });
+  const user = await User.findById(userId);
   if (!user) {
     throw new Error("Invalid user");
   }
 
-  await User.update(
-    { password: await hash(password) },
-    { where: { id: userId } }
-  );
+  await User.findByIdAndUpdate(userId, { password: await hash(password) });
 };
 
 const verifyEmail = async (token) => {
@@ -146,21 +119,14 @@ const verifyEmail = async (token) => {
       token,
       process.env.MAIL_JWT_SECRET
     );
-    const user = await User.findOne({ where: { id: userId } });
+    const user = await User.findById(userId);
     if (!user) {
       throw new Error("User không tồn tại");
     }
     if (user.verified_at) {
       return "verified";
     }
-    await User.update(
-      {
-        verified_at: new Date(),
-      },
-      {
-        where: { id: userId },
-      }
-    );
+    await User.findByIdAndUpdate(userId, { verified_at: new Date() });
   } catch (error) {
     throw new Error(error);
   }
@@ -173,6 +139,7 @@ const verifyToken = async (token) => {
     throw new Error(error);
   }
 };
+
 const refreshAccessToken = async (refreshTokenString) => {
   const refreshToken = await refreshTokenService.findValidRefreshToken(
     refreshTokenString

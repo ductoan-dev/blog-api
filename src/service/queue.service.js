@@ -1,32 +1,20 @@
-const { where } = require("sequelize");
-const { Queue, Topic } = require("../db/models");
+const { Queue } = require("@/db/models");
 
 class QueueService {
-  async findPendingJobs(data) {
-    const queue = await Queue.findAll({
-      where: {
-        status: "pending",
-      },
-    });
-    return queue;
+  async findPendingJobs() {
+    return await Queue.find({ status: "pending" });
   }
 
   async create(data) {
-    const queue = await Queue.create(data);
-    return queue;
+    return await Queue.create(data);
   }
 
   async update(id, data) {
-    await Queue.update(data, {
-      where: { id },
-    });
+    await Queue.findByIdAndUpdate(id, data);
   }
 
   async remove(id) {
-    await Queue.destroy({
-      where: { id },
-    });
-
+    await Queue.findByIdAndDelete(id);
     return null;
   }
 }

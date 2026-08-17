@@ -1,33 +1,32 @@
-const { where } = require("sequelize");
-const { Like, Post, Bookmark } = require("@/db/models");
+const { Bookmark } = require("@/db/models");
 
 class BookmarksService {
   async toggleBookmark(currentUser, postId) {
     if (!currentUser)
       throw new Error("You must be logged in to save this post.");
-    const hasUserBookmark = await currentUser.hasBookmarkedPost(postId);
-    console.log("hihi", currentUser);
 
-    if (hasUserBookmark) {
-      return await currentUser.removeBookmarkedPost(postId);
-    } else {
-      return await currentUser.addBookmarkedPost(postId);
+    const existing = await Bookmark.findOne({
+      user_id: currentUser._id,
+      post_id: postId,
+    });
+
+    if (existing) {
+      await existing.deleteOne();
+      return false;
     }
-  }
-  async remove(currentUser, ids) {
-    console.log(ids);
 
+    await Bookmark.create({ user_id: currentUser._id, post_id: postId });
+    return true;
+  }
+
+  async remove(currentUser, ids) {
     if (!currentUser)
       throw new Error("You must be logged in to remove save all post.");
 
     if (!Array.isArray(ids) || ids.length === 0)
       throw new Error("No bookmark IDs provided");
 
-    return await Bookmark.destroy({
-      where: {
-        id: ids,
-      },
-    });
+    return await Bookmark.deleteMany({ _id: { $in: ids } });
   }
 }
 

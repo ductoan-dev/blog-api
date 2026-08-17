@@ -1,57 +1,24 @@
-const { where } = require("sequelize");
-const { Like, Post } = require("@/db/models");
+const { Like } = require("@/db/models");
 
 class LikesService {
-  async getAll(type, id) {
-    const likes = await Like.findAll({
-      where: {
-        likeable_type: type,
-        likeable_id: id,
-      },
+  async getAll(type, ids) {
+    const idArray = Array.isArray(ids) ? ids : [ids];
+    return await Like.find({
+      likeable_type: type,
+      likeable_id: { $in: idArray },
     });
-    return likes;
   }
-  // async toggleLike(currentUser, type, id) {
-  //   try {
-  //     const existingLike = await Like.findOne({
-  //       where: {
-  //         user_id: currentUser.id,
-  //         likeable_type: type,
-  //         likeable_id: id,
-  //       },
-  //     });
-
-  //     if (existingLike) {
-  //       await existingLike.destroy();
-  //       return false;
-  //     } else {
-  //       await Like.create({
-  //         user_id: currentUser.id,
-  //         likeable_type: type,
-  //         likeable_id: id,
-  //         is_like: true,
-  //       });
-  //       return true;
-  //     }
-  //   } catch (error) {
-  //     console.log("toggleLike error:", error);
-  //     throw error;
-  //   }
-  // }
 
   async create(data) {
-    const like = await Like.create(data);
-    return like;
+    return await Like.create(data);
   }
 
   async update(user_id, data) {
     try {
       const like = await Like.findOne({
-        where: {
-          user_id,
-          likeable_type: data.likeable_type,
-          likeable_id: data.likeable_id,
-        },
+        user_id,
+        likeable_type: data.likeable_type,
+        likeable_id: data.likeable_id,
       });
 
       if (!like) {
@@ -60,7 +27,6 @@ class LikesService {
 
       like.is_like = data.is_like;
       await like.save();
-
       return like;
     } catch (error) {
       console.log("Lỗi khi update: ", error.message);
@@ -69,15 +35,11 @@ class LikesService {
   }
 
   async checkLike(data) {
-    const like = await Like.create(data);
-    return like;
+    return await Like.create(data);
   }
 
-  async remove(id, type) {
-    await Like.destroy({
-      where: { user_id: id, likeable_type: type },
-    });
-
+  async remove(user_id, type) {
+    await Like.deleteMany({ user_id, likeable_type: type });
     return null;
   }
 }

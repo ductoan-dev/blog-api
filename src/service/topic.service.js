@@ -1,79 +1,83 @@
-const { Post, Topic, User } = require("@/db/models");
-const sequelize = require("@/db/models").sequelize; // hoặc require("@/config/database")
-const likesService = require("@/service/like.service");
-const { Op } = require("sequelize");
+const { Topic } = require("@/db/models");
 const slugify = require("slugify");
 const { faker } = require("@faker-js/faker");
 
 class TopicService {
   async getAll() {
     try {
-      const topics = await Topic.findAll();
-      console.log(topics);
-      return topics;
+      return await Topic.find();
     } catch (error) {
       throw new Error("Unable to fetch the list of topics");
     }
   }
 
   async getById(id) {
-    const topic = await Topic.findOne({ where: { id } });
-    return topic;
+    return await Topic.findById(id);
   }
 
   async getBySlug(slug) {
     try {
-      const topic = await Topic.findOne({ where: { slug } });
-
-      return topic;
+      return await Topic.findOne({ slug });
     } catch (error) {
       throw new Error("Invalid slug");
     }
   }
 
   async findOrCreate(name) {
+    const existing = await Topic.findOne({ name });
+    if (existing) {
+      return { topic: existing, created: false };
+    }
+
     const baseSlug = slugify(name, { lower: true, strict: true });
     let slug = baseSlug;
     let counter = 1;
-
-    while (await Topic.findOne({ where: { slug } })) {
+    while (await Topic.findOne({ slug })) {
       slug = `${baseSlug}-${counter++}`;
     }
 
-    const [topic, created] = await Topic.findOrCreate({
-      where: { name },
-      defaults: {
-        name,
-        slug,
-        image: faker.image.urlPicsumPhotos(),
-        description: faker.lorem.sentence(),
-        posts_count: 0,
-      },
+    const topic = await Topic.create({
+      name,
+      slug,
+      image: faker.image.urlPicsumPhotos(),
+      description: faker.lorem.sentence(),
+      posts_count: 0,
     });
 
-    return { topic, created };
+    return { topic, created: true };
   }
+
   async create(data) {
-    const topic = await Topic.create(data);
-    return topic;
+    const { name, description, image } = data;
+    if (!name?.trim()) throw new Error("Topic name is required");
+
+    const baseSlug = slugify(name.trim(), { lower: true, strict: true });
+    let slug = baseSlug;
+    let counter = 1;
+    while (await Topic.findOne({ slug })) {
+      slug = `${baseSlug}-${counter++}`;
+    }
+
+    return await Topic.create({
+      name: name.trim(),
+      slug,
+      description: description?.trim() || "",
+      image: image?.trim() || faker.image.urlPicsumPhotos(),
+      posts_count: 0,
+    });
   }
+
   async update(id, data) {
     try {
-      await Topic.update(data, {
-        where: { id },
-      });
-
-      return await Topic.findByPk(id);
+      return await Topic.findByIdAndUpdate(id, data, { new: true });
     } catch (error) {
-      return console.log("Lỗi khi update: ", error);
+      console.log("Lỗi khi update: ", error);
+      return null;
     }
   }
 
   async remove(id) {
-    await Topic.destroy({
-      where: { id },
-    });
-
+    await Topic.findByIdAndDelete(id);
     return null;
   }
 }

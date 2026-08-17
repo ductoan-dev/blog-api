@@ -3,13 +3,16 @@ const express = require("express");
 const router = express.Router();
 const postController = require("@/controllers/post.controller");
 const checkAuth = require("@/middlewares/checkAuth");
+const optionalAuth = require("@/middlewares/optionalAuth");
 const upload = require("@/middlewares/upload");
 
-router.get("/", postController.index);
+router.get("/", optionalAuth, postController.index);
+router.get("/search", optionalAuth, postController.search);
 router.get("/me", checkAuth, postController.getListByMe);
+router.get("/following", checkAuth, postController.getFollowingFeed);
 
-router.get("/slug/:slug", postController.getBySlug);
-router.get("/topic/:topicId", checkAuth, postController.getByTopicId);
+router.get("/slug/:slug", optionalAuth, postController.getBySlug);
+router.get("/topic/:topicId", optionalAuth, postController.getByTopicId);
 router.get("/user/bookmarks", checkAuth, postController.getListByUserId);
 
 router.get("/:postId/related", postController.getRelatedPosts);

@@ -8,6 +8,10 @@ const topicRouter = require("./topic.route");
 const commentRouter = require("./comment.route");
 const likeRouter = require("./like.route");
 const bookmarkRouter = require("./booknmark.route");
+const messengerRouter = require("./messenger.route");
+const notificationRouter = require("./notification.route");
+const { me } = require("@/controllers/auth.controller");
+
 
 const router = express.Router();
 
@@ -21,4 +25,8 @@ router.use("/users", userRouter);
 router.use("/likes", likeRouter);
 router.use("/bookmarks", bookmarkRouter);
 
+
+// messenger
+router.use("/messenger", messengerRouter);
+router.use("/notifications", notificationRouter);
 module.exports = router;

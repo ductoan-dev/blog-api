@@ -4,7 +4,7 @@ exports.create = async (req, res) => {
   try {
     const bookmark = await bookmarksService.toggleBookmark(
       req.user,
-      +req.params.postId
+      req.params.postId
     );
 
     response.succsess(res, 200, bookmark);

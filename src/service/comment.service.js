@@ -1,111 +1,65 @@
-const {
-  Post,
-  Comment,
-  User,
-  UserSetting,
-  Queue,
-  Like,
-} = require("@/db/models");
+const { Post, Comment, User, Queue, Like } = require("@/db/models");
 const likesService = require("@/service/like.service");
-const { Op } = require("sequelize");
+const emitter = require("@/utils/emitter");
+const notificationService = require("@/service/notification.service");
 
 class CommentService {
   async getAll() {
-    const comments = await Comment.findAll();
-
-    return comments;
+    return await Comment.find();
   }
+
   async getById(id) {
-    const comment = await Comment.findOne({
-      where: { id },
-      include: [{ model: Post, as: "post" }],
-    });
-
-    return comment;
+    return await Comment.findById(id).populate("post_id");
   }
+
   async getBySlug(slug) {
-    const comment = await Comment.findOne({
-      where: { slug },
-      include: [{ model: Post, as: "post" }],
-    });
-    return comment;
+    const post = await Post.findOne({ slug });
+    if (!post) return null;
+    return await Comment.find({ post_id: post._id }).populate("post_id");
   }
 
   async getAllCommentsInPost(postId, currentUser) {
-    const comments = await Comment.findAll({
-      where: {
-        post_id: postId,
-        deleted_at: null,
-        parent_id: null,
-      },
-      attributes: [
-        "id",
-        "user_id",
-        "post_id",
-        "parent_id",
-        "content",
-        "like_count",
-        "edited_at",
-        "deleted_at",
-        "created_at",
-        "updated_at",
-      ],
-      include: [
-        {
-          model: User,
-          as: "user",
-          attributes: [
-            "id",
-            "avatar",
-            // "fullname",
-            "first_name",
-            "last_name",
-            "email",
-            "username",
-          ],
-        },
-        {
-          model: Comment,
-          as: "replies",
-          where: {
-            deleted_at: null,
-          },
-          required: false,
-          attributes: [
-            "id",
-            "user_id",
-            "post_id",
-            "parent_id",
-            "content",
-            "like_count",
-            "deleted_at",
-            "edited_at",
+    const userFields = "id avatar first_name last_name email username";
 
-            "created_at",
-            "updated_at",
-          ],
+    const comments = await Comment.find({
+      post_id: postId,
+      deleted_at: null,
+      parent_id: null,
+    })
+      .populate("user_id", userFields)
+      .lean();
 
-          include: [
-            {
-              model: User,
-              as: "user",
-              attributes: [
-                "id",
-                "avatar",
-                "first_name",
-                // "fullname",
-                "last_name",
-                "email",
-                "username",
-              ],
-            },
-          ],
-        },
-      ],
+    const replies = await Comment.find({
+      post_id: postId,
+      deleted_at: null,
+      parent_id: { $ne: null },
+    })
+      .populate("user_id", userFields)
+      .lean();
+
+    const replyMap = {};
+    replies.forEach((r) => {
+      const key = r.parent_id.toString();
+      if (!replyMap[key]) replyMap[key] = [];
+      replyMap[key].push(r);
     });
 
-    return this.likeCommentFlags(comments, currentUser);
+    const normalize = (c) => ({
+      ...c,
+      id: c._id.toString(),
+      user: c.user_id,
+      created_at: c.createdAt,
+      updated_at: c.updatedAt,
+    });
+
+    const commentsWithReplies = comments.map((c) => ({
+      ...normalize(c),
+      replies: (replyMap[c._id.toString()] || []).map(normalize),
+    }));
+
+    return this.likeCommentFlags(commentsWithReplies, currentUser);
   }
+
   likeCommentFlags = async (comments, currentUser) => {
     if (!currentUser) return comments;
 
@@ -117,97 +71,58 @@ class CommentService {
       }
     });
 
-    const commentIds = allComments.map((comment) => comment?.id);
-
+    const commentIds = allComments.map((c) => c._id);
     const likes = await likesService.getAll("Comment", commentIds);
 
     const currentUserLikes = new Set();
     likes.forEach((like) => {
-      if (like.user_id === currentUser.id) {
-        currentUserLikes.add(like.likeable_id);
+      if (like.user_id.toString() === currentUser.id) {
+        currentUserLikes.add(like.likeable_id.toString());
       }
     });
 
-    const withLikeFlag = comments.map((comment) => {
-      const commentJSON = comment.toJSON();
-      commentJSON.is_like = currentUserLikes.has(comment?.id);
+    return comments.map((comment) => {
+      const withFlag = {
+        ...comment,
+        is_like: currentUserLikes.has(comment._id.toString()),
+      };
 
-      if (commentJSON.replies && commentJSON.replies.length > 0) {
-        commentJSON.replies = commentJSON.replies.map((reply) => ({
+      if (withFlag.replies && withFlag.replies.length > 0) {
+        withFlag.replies = withFlag.replies.map((reply) => ({
           ...reply,
-          is_like: currentUserLikes.has(reply.id),
+          is_like: currentUserLikes.has(reply._id.toString()),
         }));
       }
 
-      return commentJSON;
+      return withFlag;
     });
-
-    return withLikeFlag;
   };
 
-  // async getById(id) {
-  //   const topic = await Comment.findOne({ where: { id } });
-  //   return topic;
-  // }
-
-  // async getBySlug(slug) {
-  //   // console.log(slug);
-
-  //   // Nếu đây là tìm post theo slug
-  //   const post = await Post.findOne({
-  //     where: { slug },
-  //     include: [
-  //       { model: Comment, as: "topics" },
-  //       { model: User, as: "user" },
-  //     ],
-  //   });
-
-  //   if (post?.user) {
-  //     post.user.full_name = `${post.user.first_name} ${post.user.last_name}`;
-  //   }
-  //   return post;
-  // }
-
-  // Nếu bạn muốn tìm topic theo slug
-  // async getTopicBySlug(slug) {
-  //   const topic = await Comment.findOne({
-  //     where: { slug },
-  //     include: [
-  //       {
-  //         model: Post,
-  //         as: "posts",
-  //         include: [{ model: User, as: "user" }],
-  //       },
-  //     ],
-  //   });
-  //   return topic;
-  // }
-
   async toggleLike(currentUser, commentId) {
-    console.log(commentId);
-
     if (!currentUser)
       throw new Error("You must be logged in to like this post.");
 
-    const [like, created] = await Like.findOrCreate({
-      where: {
-        likeable_id: commentId,
-        user_id: currentUser.id,
-        likeable_type: "Comment",
-      },
+    const existing = await Like.findOne({
+      likeable_id: commentId,
+      user_id: currentUser._id,
+      likeable_type: "Comment",
     });
 
-    const comment = await Comment.findByPk(commentId);
-
+    const comment = await Comment.findById(commentId);
     if (!comment) throw new Error("Comment not found");
 
-    if (!created) {
-      await like.destroy();
+    if (existing) {
+      await existing.deleteOne();
       comment.like_count = Math.max(0, (comment.like_count ?? 0) - 1);
       await comment.save();
       return false;
     }
 
+    await Like.create({
+      likeable_id: commentId,
+      user_id: currentUser._id,
+      likeable_type: "Comment",
+    });
     comment.like_count = (comment.like_count ?? 0) + 1;
     await comment.save();
     return true;
@@ -220,26 +135,12 @@ class CommentService {
     let currentPost = null;
 
     try {
-      currentPost = await Post.findOne({
-        where: {
-          id: data.post_id,
-        },
-      });
+      currentPost = await Post.findById(data.post_id);
       if (currentPost) {
-        const userPost = await User.findByPk(currentPost?.user_id, {
-          include: {
-            model: UserSetting,
-            as: "settings",
-          },
-        });
-        let settings = {};
-        try {
-          settings = userPost?.settings?.data
-            ? JSON.parse(userPost.settings.data)
-            : {};
-        } catch (e) {
-          settings = {};
-        }
+        const userPost = await User.findById(currentPost.user_id);
+        const settings = userPost?.settings?.data
+          ? JSON.parse(userPost.settings.data)
+          : {};
 
         if (settings.allowComments === false) {
           throw new Error("Bạn không thể comment bài post này");
@@ -248,11 +149,10 @@ class CommentService {
     } catch (error) {
       throw new Error(error.message);
     }
+
     if (parentId) {
-      const parentComment = await Comment.findByPk(parentId);
-      if (!parentComment) {
-        throw new Error("Parent not found");
-      }
+      const parentComment = await Comment.findById(parentId);
+      if (!parentComment) throw new Error("Parent not found");
       if (parentComment.parent_id) {
         parentId = parentComment.parent_id;
       }
@@ -261,129 +161,123 @@ class CommentService {
     const comment = await Comment.create({
       ...data,
       parent_id: parentId,
-      user_id: currentUser.id,
+      user_id: currentUser._id,
     });
-    await comment.reload({
-      include: [
-        {
-          model: User,
-          as: "user",
-          attributes: [
-            "id",
-            "avatar",
-            "first_name",
-            "last_name",
-            "email",
-            "username",
-          ],
-        },
-        {
-          model: Comment,
-          as: "replies",
-          attributes: [
-            "id",
-            "user_id",
-            "post_id",
-            "parent_id",
-            "content",
-            "like_count",
-            "deleted_at",
-            "created_at",
-            "updated_at",
-          ],
-          include: [
-            {
-              model: User,
-              as: "user",
-              attributes: [
-                "id",
-                "avatar",
-                "first_name",
-                "last_name",
-                "email",
-                "username",
-              ],
-            },
-          ],
-        },
-      ],
-    });
+
+    const populated = await Comment.findById(comment._id)
+      .populate("user_id", "id avatar first_name last_name email username")
+      .lean();
+
+    const result = { ...populated, user: populated.user_id, replies: [] };
+
     try {
       if (currentPost) {
-        const userPost = await User.findByPk(currentPost?.user_id, {
-          include: {
-            model: UserSetting,
-            as: "settings",
-          },
-        });
+        const userPost = await User.findById(currentPost.user_id);
         const settings = userPost?.settings?.data
           ? JSON.parse(userPost.settings.data)
           : {};
-        if (userPost.id !== currentUser.id && settings.emailNewComments) {
+        if (
+          userPost._id.toString() !== currentUser._id.toString() &&
+          settings.emailNewComments
+        ) {
           await Queue.create({
             type: "sendNewCommentJob",
             payload: {
-              userPostId: userPost.id,
-              userCommetnId: currentUser.id,
+              userPostId: userPost._id.toString(),
+              userCommetnId: currentUser._id.toString(),
               content: data.content,
-              post: currentPost,
+              post: currentPost.toObject(),
             },
+          });
+        }
+
+        // In-app notification to post author
+        if (userPost._id.toString() !== currentUser._id.toString()) {
+          const commenterName =
+            currentUser.fullname ||
+            [currentUser.first_name, currentUser.last_name].filter(Boolean).join(" ") ||
+            currentUser.username;
+          const notifTitle = parentId
+            ? `${commenterName} đã trả lời bình luận trong bài viết của bạn`
+            : `${commenterName} đã bình luận về bài viết của bạn`;
+          const notif = await notificationService.create({
+            userId: userPost._id,
+            type: "comment",
+            title: notifTitle,
+            notifiableType: "Post",
+            notifiableId: currentPost._id,
+            messageLink: `/blog/${currentPost.slug}`,
+          });
+          emitter.emit("notification:post_comment", {
+            toUserId: userPost._id.toString(),
+            notification: notif,
           });
         }
       }
     } catch (error) {
       console.log(error);
     }
-    return comment;
+
+    // Notify the direct parent comment author when this is a reply
+    if (data.parent_id) {
+      try {
+        const parentComment = await Comment.findById(data.parent_id)
+          .populate("user_id", "_id fullname first_name last_name username")
+          .lean();
+        if (parentComment?.user_id) {
+          const parentAuthorId = parentComment.user_id._id.toString();
+          const postAuthorId = currentPost?.user_id?.toString() || "";
+          // Skip if the parent author is the replier or the post author (already notified above)
+          if (
+            parentAuthorId !== currentUser._id.toString() &&
+            parentAuthorId !== postAuthorId
+          ) {
+            const commenterName =
+              currentUser.fullname ||
+              [currentUser.first_name, currentUser.last_name].filter(Boolean).join(" ") ||
+              currentUser.username;
+            const notif = await notificationService.create({
+              userId: parentComment.user_id._id,
+              type: "comment",
+              title: `${commenterName} đã trả lời bình luận của bạn`,
+              notifiableType: "Post",
+              notifiableId: currentPost._id,
+              messageLink: `/blog/${currentPost.slug}`,
+            });
+            emitter.emit("notification:post_comment", {
+              toUserId: parentAuthorId,
+              notification: notif,
+            });
+          }
+        }
+      } catch (err) {
+        console.log("Reply notification error:", err);
+      }
+    }
+
+    return result;
   }
 
   async update(id, data) {
     try {
-      const comment = await Comment.findByPk(id, {
-        attributes: ["id", "content", "deleted_at", "edited_at"],
-      });
+      const comment = await Comment.findById(id).select(
+        "id content deleted_at edited_at"
+      );
 
-      if (!comment) {
-        console.log("Không tìm thấy comment");
-        return null;
-      }
+      if (!comment) return null;
+      if (comment.deleted_at) return null;
 
-      if (comment.deleted_at) {
-        console.log("Comment đã bị xóa");
-        return null;
-      }
-
-      // comment.content = data.content;
       comment.deleted_at = new Date();
       await comment.save();
-
       return comment;
     } catch (error) {
       console.log("Lỗi khi update:", error);
       return null;
     }
   }
-  // async update(id, data, currentUser) {
-  //   if (!currentUser)
-  //     throw new Error("You must be logged in to edit comment this post.");
-
-  //   try {
-  //     await Comment.update(data, {
-  //       where: { id },
-  //     });
-
-  //     return await Comment.findByPk(id);
-  //   } catch (error) {
-  //     return console.log("Lỗi khi update: ", error);
-  //   }
-  // }
 
   async remove(id) {
-    await Comment.destroy({
-      where: { id },
-    });
-    console.log(id);
-
+    await Comment.findByIdAndDelete(id);
     return null;
   }
 }

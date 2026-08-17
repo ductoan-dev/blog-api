@@ -1,68 +1,48 @@
-const {
-  Post,
-  Topic,
-  Comment,
-  User,
-  UserSetting,
-  Queue,
-  Sequelize,
-} = require("@/db/models");
+const { User, Queue, Follow } = require("@/db/models");
+const emitter = require("@/utils/emitter");
+const notificationService = require("@/service/notification.service");
 
 const isEmail = (value) =>
   typeof value === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
 class UserService {
   async getAllUser() {
-    const user = await User.findAll();
-    return user;
+    return await User.find();
   }
+
   async getUserById(id) {
-    const user = await User.findOne({ where: { id } });
-    return user;
+    return await User.findById(id);
   }
-  canUserViewProfile(currentUser, targetUser, followingIds = []) {
+
+  canUserViewProfile(currentUser, targetUser, followerIds = []) {
     const profileVisibility = this.getUserProfileVisibility(targetUser);
 
     if (!currentUser) {
-      return {
-        canView: profileVisibility === "public",
-        type: profileVisibility,
-      };
+      return { canView: profileVisibility === "public", type: profileVisibility };
     }
 
-    if (targetUser.id === currentUser.id) {
-      return {
-        canView: true,
-        type: "self",
-      };
+    if (targetUser._id.toString() === currentUser._id.toString()) {
+      return { canView: true, type: "self" };
     }
 
     if (profileVisibility === "public") {
-      return {
-        canView: true,
-        type: "public",
-      };
+      return { canView: true, type: "public" };
     }
 
     if (profileVisibility === "followers") {
       return {
-        canView: followingIds.includes(currentUser.id),
+        canView: followerIds.includes(currentUser.id),
         type: "followers",
       };
     }
 
     if (profileVisibility === "private") {
-      return {
-        canView: false,
-        type: "private",
-      };
+      return { canView: false, type: "private" };
     }
 
-    return {
-      canView: false,
-      type: "unknown",
-    };
+    return { canView: false, type: "unknown" };
   }
+
   getUserProfileVisibility(user) {
     try {
       if (user.settings && user.settings.data) {
@@ -79,22 +59,8 @@ class UserService {
   async getUserFollowingIds(currentUser) {
     try {
       if (!currentUser) return [];
-
-      const userFollowing = await User.findByPk(currentUser.id, {
-        include: {
-          model: User,
-          as: "following",
-          attributes: ["id"],
-          through: { attributes: [] },
-        },
-      });
-
-      if (!userFollowing || !userFollowing.following) {
-        return [];
-      }
-
-      const ids = userFollowing.following.map((item) => item.id);
-      return ids;
+      const follows = await Follow.find({ follower_id: currentUser._id }).select("following_id");
+      return follows.map((f) => f.following_id.toString());
     } catch (error) {
       console.log(error);
       return [];
@@ -103,41 +69,21 @@ class UserService {
 
   async getUserByUsername(username, currentUser = null) {
     try {
-      const user = await User.findOne({
-        where: {
-          username,
-        },
-        include: [
-          {
-            model: UserSetting,
-            as: "settings",
-            required: false,
-          },
-          {
-            model: User,
-            as: "followers",
-            attributes: ["id"],
-          },
-        ],
-      });
+      const user = await User.findOne({ username });
 
-      if (!user) {
-        throw new Error("User does not exist");
-      }
+      if (!user) throw new Error("User does not exist");
 
-      const followerIds = user?.followers.map((item) => item.id);
+      const followerDocs = await Follow.find({ following_id: user._id }).select("follower_id");
+      const followerIds = followerDocs.map((f) => f.follower_id.toString());
 
       const result = this.canUserViewProfile(currentUser, user, followerIds);
 
       if (!result.canView) {
-        console.log(result);
-
         return {
           id: user.id,
           username: user.username,
           title: user.title,
           avatar: user.avatar,
-          // fullname: user.fullname,
           canView: false,
           type: result.type,
           follower_count: user.follower_count,
@@ -145,7 +91,6 @@ class UserService {
         };
       }
 
-      // Trả về user data nếu có quyền xem
       return user;
     } catch (error) {
       throw error;
@@ -154,74 +99,92 @@ class UserService {
 
   async toggleFollow(currentUser, userId) {
     if (!currentUser) throw new Error("Bạn phải đăng nhập để follow");
-    if (currentUser.id === userId)
+    if (currentUser._id.toString() === userId.toString())
       throw new Error("You cannot follow yourself");
 
-    const userFollowing = await User.findOne({
-      where: { id: currentUser.id },
+    const userFollowing = await User.findById(currentUser._id);
+    const userFollower = await User.findById(userId);
+
+    if (!userFollower) throw new Error("User not found");
+
+    const existingFollow = await Follow.findOne({
+      follower_id: currentUser._id,
+      following_id: userId,
     });
-    const userFollower = await User.findOne({
-      where: { id: userId },
-      include: {
-        model: UserSetting,
-        as: "settings",
-        required: false,
-      },
-    });
-    const hasFollowingUser = await currentUser.hasFollowing(userId);
-    if (hasFollowingUser) {
-      userFollowing.following_count = Math.max(
-        0,
-        (userFollowing.following_count ?? 0) - 1
-      );
-      userFollower.follower_count = Math.max(
-        0,
-        (userFollower.follower_count ?? 0) - 1
-      );
+
+    if (existingFollow) {
+      await existingFollow.deleteOne();
+      userFollowing.following_count = Math.max(0, (userFollowing.following_count ?? 0) - 1);
+      userFollower.follower_count = Math.max(0, (userFollower.follower_count ?? 0) - 1);
       await userFollower.save();
       await userFollowing.save();
-      return await currentUser.removeFollowing(userId);
-    } else {
-      userFollower.follower_count = userFollower.follower_count + 1;
-      userFollowing.following_count = userFollowing.following_count + 1;
-      await userFollower.save();
-      await userFollowing.save();
-      try {
-        const settings = userFollower?.settings?.data
-          ? JSON.parse(userFollower.settings.data)
-          : {};
-        if (settings.emailNewFollowers) {
-          await Queue.create({
-            type: "sendNewFollowerJob",
-            payload: {
-              following: userFollower,
-              follower: userFollowing,
-            },
-          });
-        }
-      } catch (error) {
-        console.log(error);
-      }
-      return await currentUser.addFollowing(userId);
+      return false;
     }
+
+    await Follow.create({ follower_id: currentUser._id, following_id: userId });
+    userFollower.follower_count = (userFollower.follower_count ?? 0) + 1;
+    userFollowing.following_count = (userFollowing.following_count ?? 0) + 1;
+    await userFollower.save();
+    await userFollowing.save();
+
+    // Create follow notification for the person being followed (userFollower)
+    try {
+      const followerName = userFollowing.fullname ||
+        [userFollowing.first_name, userFollowing.last_name].filter(Boolean).join(" ") ||
+        userFollowing.username;
+      const notif = await notificationService.create({
+        userId: userFollower._id,
+        type: "follow",
+        title: `${followerName} đã theo dõi bạn`,
+        notifiableType: "User",
+        notifiableId: userFollowing._id,
+        messageLink: `/profile/${userFollowing.username}`,
+      });
+      emitter.emit("notification:follow", { toUserId: userFollower._id.toString(), notification: notif });
+    } catch (error) {
+      console.log("Follow notification error:", error);
+    }
+
+    try {
+      const settings = userFollower.settings?.data
+        ? JSON.parse(userFollower.settings.data)
+        : {};
+      if (settings.emailNewFollowers) {
+        await Queue.create({
+          type: "sendNewFollowerJob",
+          payload: { following: userFollower.toObject(), follower: userFollowing.toObject() },
+        });
+      }
+    } catch (error) {
+      console.log(error);
+    }
+
+    return true;
+  }
+
+  async getFollowersList(userId) {
+    const follows = await Follow.find({ following_id: userId })
+      .populate("follower_id", "id _id username fullname first_name last_name avatar title")
+      .lean();
+    return follows.map((f) => ({ ...f.follower_id, id: f.follower_id._id.toString() }));
+  }
+
+  async getFollowingList(userId) {
+    const follows = await Follow.find({ follower_id: userId })
+      .populate("following_id", "id _id username fullname first_name last_name avatar title")
+      .lean();
+    return follows.map((f) => ({ ...f.following_id, id: f.following_id._id.toString() }));
   }
 
   async checkFollowing(currentUser, userId) {
     if (!currentUser) throw new Error("Bạn phải đăng nhập để follow");
 
-    const userFollows = await User.findAll({
-      where: { id: userId },
-      include: [
-        {
-          model: User,
-          as: "followers",
-          where: { id: currentUser.id },
-        },
-      ],
+    const follow = await Follow.findOne({
+      follower_id: currentUser._id,
+      following_id: userId,
     });
-    if (userFollows.length === 0) return false;
 
-    return true;
+    return !!follow;
   }
 
   async editProfile(avatarOrCoverPath, data, currentUser) {
@@ -229,21 +192,17 @@ class UserService {
 
     const updateData = {};
 
-    // Nếu có file mới thì cập nhật, không thì bỏ qua
     if (avatarOrCoverPath?.avatar?.[0]?.path) {
       updateData.avatar = avatarOrCoverPath.avatar[0].path.replace(/\\/g, "/");
     }
     if (avatarOrCoverPath?.cover_image?.[0]?.path) {
-      updateData.cover_image = avatarOrCoverPath.cover_image[0].path.replace(
-        /\\/g,
-        "/"
-      );
+      updateData.cover_image = avatarOrCoverPath.cover_image[0].path.replace(/\\/g, "/");
     }
 
     const newData = { ...updateData, ...data };
 
     try {
-      return await currentUser.update(newData);
+      return await User.findByIdAndUpdate(currentUser._id, newData, { new: true });
     } catch (error) {
       throw new Error(error);
     }
@@ -252,31 +211,38 @@ class UserService {
   async setting(data, currentUser) {
     if (!currentUser) throw new Error("You must be logged to edit settings");
     const { email, ...settings } = data;
+
     if (email !== currentUser.email) {
       if (email && !isEmail(email)) {
         throw new Error("Invalid email address");
       }
-      await currentUser.update({ verified_at: null, email });
+      await User.findByIdAndUpdate(currentUser._id, { verified_at: null, email });
 
       await Queue.create({
         type: "sendVerifyEmailJob",
-        payload: { userId: currentUser.id },
+        payload: { userId: currentUser._id.toString() },
       });
     }
-    const user = await UserSetting.findOne({
-      where: {
-        user_id: currentUser.id,
-      },
+
+    await User.findByIdAndUpdate(currentUser._id, {
+      settings: { data: JSON.stringify(settings) },
     });
-    if (user) {
-      user.data = JSON.stringify(settings);
-      await user.save();
-    } else {
-      await UserSetting.create({
-        user_id: currentUser.id,
-        data: JSON.stringify(settings),
-      });
-    }
+  }
+
+  async search(query) {
+    const regex = new RegExp(query, "i");
+    const users = await User.find({
+      $or: [
+        { username: regex },
+        { fullname: regex },
+        { first_name: regex },
+        { last_name: regex },
+      ],
+    })
+      .select("id avatar username fullname first_name last_name title")
+      .lean();
+
+    return users.map((u) => ({ ...u, id: u._id.toString() }));
   }
 }
 

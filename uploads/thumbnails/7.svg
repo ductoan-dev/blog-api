@@ -1,0 +1,9 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" width="800" height="400" viewBox="0 0 800 400">
+  <rect width="800" height="400" fill="#14532d"/>
+  <circle cx="650" cy="80" r="180" fill="#86efac" opacity="0.15"/>
+  <circle cx="100" cy="350" r="120" fill="#86efac" opacity="0.1"/>
+  <rect x="60" y="160" width="480" height="6" rx="3" fill="#86efac" opacity="0.6"/>
+  <rect x="60" y="185" width="320" height="6" rx="3" fill="#86efac" opacity="0.4"/>
+  <rect x="60" y="210" width="200" height="6" rx="3" fill="#86efac" opacity="0.25"/>
+  <text x="60" y="140" font-family="system-ui,sans-serif" font-size="28" font-weight="700" fill="#86efac">React</text>
+</svg>
