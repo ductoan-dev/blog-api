@@ -3,7 +3,6 @@ require("dotenv").config();
 const http = require("http");
 const express = require("express");
 const cors = require("cors");
-const mongoose = require("mongoose");
 const path = require("path");
 const { Server } = require("socket.io");
 const router = require("@/routes/api");
@@ -11,14 +10,6 @@ const app = express();
 
 const errorHandler = require("@/middlewares/errors/errorHandler");
 const notFoudHandler = require("@/middlewares/errors/notFoundHandler");
-
-mongoose
-  .connect(process.env.MONGODB_URI)
-  .then(() => console.log("MongoDB connected"))
-  .catch((err) => {
-    console.error("MongoDB connection error:", err);
-    process.exit(1);
-  });
 
 app.use(cors());
 app.use(express.json());
