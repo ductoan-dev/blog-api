@@ -15,7 +15,7 @@ async function jobProcess(job) {
     } catch (error) {
       await QueueService.update(job.id, { status: "reject" });
 
-      if (job.max_retries < job.retries_count) {
+      if (job.maxRetries < job.retriesCount) {
         await QueueService.update(job.id, {
           status: "failed",
         });

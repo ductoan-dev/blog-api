@@ -1,20 +1,20 @@
-const { Queue } = require("@/db/models");
+const prisma = require("@/db/prisma");
 
 class QueueService {
   async findPendingJobs() {
-    return await Queue.find({ status: "pending" });
+    return prisma.queue.findMany({ where: { status: "pending" } });
   }
 
   async create(data) {
-    return await Queue.create(data);
+    return prisma.queue.create({ data });
   }
 
   async update(id, data) {
-    await Queue.findByIdAndUpdate(id, data);
+    await prisma.queue.update({ where: { id }, data });
   }
 
   async remove(id) {
-    await Queue.findByIdAndDelete(id);
+    await prisma.queue.delete({ where: { id } });
     return null;
   }
 }

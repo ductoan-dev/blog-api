@@ -2,14 +2,14 @@ require("module-alias/register");
 require("dotenv").config();
 const transporter = require("@/config/mailer");
 const loadEmail = require("@/utils/loadEmail");
-const { User } = require("@/db/models");
+const prisma = require("@/db/prisma");
 const jwtService = require("@/service/jwt.service");
 
 async function sendVerifyEmailJob(job) {
   try {
     const { userId } = job.payload;
 
-    const user = await User.findById(userId);
+    const user = await prisma.user.findUnique({ where: { id: userId } });
 
     if (!user) {
       throw new Error(`User not found with ID: ${userId}`);
