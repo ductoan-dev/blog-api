@@ -1,0 +1,10 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+.env
+.env.test
+.superpowers
+uploads
+server_out.txt
+server_err.txt
