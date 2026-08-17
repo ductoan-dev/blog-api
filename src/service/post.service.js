@@ -1,26 +1,23 @@
-const { Post, Topic, User, Like, Bookmark } = require("@/db/models");
+const prisma = require("@/db/prisma");
 const likesService = require("@/service/like.service");
 const topicsService = require("@/service/topic.service");
 const usersService = require("@/service/user.service");
 const slugify = require("slugify");
 const emitter = require("@/utils/emitter");
 const notificationService = require("@/service/notification.service");
+const { serializePost } = require("@/utils/serializers");
+
+const POST_INCLUDE = { user: true, topics: true, tags: true };
 
 class PostsService {
   async getAll(currentUser = null) {
-    const posts = await Post.find()
-      .populate("topics")
-      .populate("user_id", "id avatar first_name last_name username fullname")
-      .sort({ published_at: -1, createdAt: -1 })
-      .lean();
+    const posts = await prisma.post.findMany({
+      include: POST_INCLUDE,
+      orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
+    });
 
-    const mapped = posts.map((post) => ({
-      ...post,
-      id: post._id.toString(),
-      user: post.user_id,
-    }));
-
-    const postIds = posts.map((p) => p._id);
+    const mapped = posts.map(serializePost);
+    const postIds = posts.map((p) => p.id);
     const result = await this.handleLikeAndBookmarkFlags(mapped, currentUser);
     return { posts: result, postIds };
   }
@@ -30,9 +27,7 @@ class PostsService {
       return post.visibility === "public" || !post.visibility;
     }
 
-    const postUserId = post.user_id?._id
-      ? post.user_id._id.toString()
-      : post.user_id?.toString();
+    const postUserId = post.user?.id;
 
     if (postUserId === currentUser.id) return true;
 
@@ -46,23 +41,19 @@ class PostsService {
   }
 
   async getById(id) {
-    const post = await Post.findById(id)
-      .populate("topics")
-      .populate("user_id", "id avatar first_name last_name username fullname")
-      .lean();
-
+    const post = await prisma.post.findUnique({ where: { id }, include: POST_INCLUDE });
     if (!post) return null;
-    return { ...post, id: post._id.toString(), user: post.user_id };
+    return serializePost(post);
   }
 
   async getListByMe(currentUser) {
     try {
-      const posts = await Post.find({ user_id: currentUser._id })
-        .populate("topics")
-        .populate("user_id", "id avatar first_name last_name username")
-        .lean();
+      const posts = await prisma.post.findMany({
+        where: { userId: currentUser.id },
+        include: POST_INCLUDE,
+      });
 
-      const mapped = posts.map((p) => ({ ...p, id: p._id.toString(), user: p.user_id }));
+      const mapped = posts.map(serializePost);
       return this.handleLikeAndBookmarkFlags(mapped, currentUser);
     } catch (error) {
       throw new Error("Get fail");
@@ -70,19 +61,15 @@ class PostsService {
   }
 
   async getByUserName(username, currentUser) {
-    const user = await User.findOne({ username });
+    const user = await prisma.user.findUnique({ where: { username } });
     if (!user) throw new Error("Not found user by username");
 
-    const posts = await Post.find({
-      user_id: user._id,
-      status: "published",
-      published_at: { $lte: new Date() },
-    })
-      .populate("topics")
-      .populate("user_id", "id avatar username first_name last_name")
-      .lean();
+    const posts = await prisma.post.findMany({
+      where: { userId: user.id, status: "published", publishedAt: { lte: new Date() } },
+      include: POST_INCLUDE,
+    });
 
-    const mapped = posts.map((p) => ({ ...p, id: p._id.toString(), user: p.user_id }));
+    const mapped = posts.map(serializePost);
 
     const followingIds = await usersService.getUserFollowingIds(currentUser);
     const postVisible = mapped.filter((post) =>
@@ -95,38 +82,34 @@ class PostsService {
   handleLikeAndBookmarkFlags = async (posts, currentUser) => {
     if (!currentUser) return posts;
 
-    const postIds = posts.map((p) => p._id);
+    const postIds = posts.map((p) => p.id);
 
     const [likes, bookmarks] = await Promise.all([
       likesService.getAll("Post", postIds),
-      Bookmark.find({ user_id: currentUser._id, post_id: { $in: postIds } }),
+      prisma.bookmark.findMany({ where: { userId: currentUser.id, postId: { in: postIds } } }),
     ]);
 
     const likedSet = new Set();
     likes.forEach((like) => {
-      if (like.user_id.toString() === currentUser.id) {
-        likedSet.add(like.likeable_id.toString());
+      if (like.userId === currentUser.id) {
+        likedSet.add(like.likeableId);
       }
     });
 
-    const bookmarkSet = new Set(bookmarks.map((b) => b.post_id.toString()));
+    const bookmarkSet = new Set(bookmarks.map((b) => b.postId));
 
     return posts.map((post) => ({
       ...post,
-      is_like: likedSet.has(post._id.toString()),
-      is_bookmark: bookmarkSet.has(post._id.toString()),
+      is_like: likedSet.has(post.id),
+      is_bookmark: bookmarkSet.has(post.id),
     }));
   };
 
   async getBySlug(slug, currentUser = null) {
-    const post = await Post.findOne({ slug })
-      .populate("topics")
-      .populate("user_id", "id avatar first_name last_name username fullname")
-      .lean();
-
+    const post = await prisma.post.findUnique({ where: { slug }, include: POST_INCLUDE });
     if (!post) return null;
 
-    const base = { ...post, id: post._id.toString(), user: post.user_id };
+    const base = serializePost(post);
     const [withFlags] = await this.handleLikeAndBookmarkFlags([base], currentUser);
     return withFlags;
   }
@@ -134,30 +117,30 @@ class PostsService {
   async getBookmarkedPostsByUser(currentUser) {
     if (!currentUser) throw new Error("You must be logged in to access this.");
 
-    const bookmarks = await Bookmark.find({ user_id: currentUser._id });
-    const postIds = bookmarks.map((b) => b.post_id);
+    const bookmarks = await prisma.bookmark.findMany({ where: { userId: currentUser.id } });
+    const postIds = bookmarks.map((b) => b.postId);
 
-    const posts = await Post.find({ _id: { $in: postIds } })
-      .populate("topics")
-      .populate("user_id", "id first_name last_name avatar")
-      .lean();
+    const posts = await prisma.post.findMany({
+      where: { id: { in: postIds } },
+      include: POST_INCLUDE,
+    });
 
-    const mapped = posts.map((p) => ({ ...p, user: p.user_id }));
+    const mapped = posts.map(serializePost);
     return this.handleLikeAndBookmarkFlags(mapped, currentUser);
   }
 
   async getByTopicId(currentUser, topicId) {
     try {
-      const posts = await Post.find({
-        topics: topicId,
-        status: "published",
-        published_at: { $lte: new Date() },
-      })
-        .populate("topics")
-        .populate("user_id")
-        .lean();
+      const posts = await prisma.post.findMany({
+        where: {
+          topics: { some: { id: topicId } },
+          status: "published",
+          publishedAt: { lte: new Date() },
+        },
+        include: POST_INCLUDE,
+      });
 
-      const mapped = posts.map((p) => ({ ...p, user: p.user_id }));
+      const mapped = posts.map(serializePost);
 
       const followingIds = await usersService.getUserFollowingIds(currentUser);
       const postVisible = mapped.filter((post) =>
@@ -171,50 +154,45 @@ class PostsService {
   }
 
   async getRelatedPosts(currentPostId, currentUser) {
-    const currentPost = await Post.findOne({
-      _id: currentPostId,
-      status: "published",
-      published_at: { $lte: new Date() },
-    }).select("topics");
+    const currentPost = await prisma.post.findUnique({
+      where: { id: currentPostId },
+      include: { topics: true },
+    });
 
-    if (!currentPost) throw new Error("Post not found");
+    if (!currentPost || currentPost.status !== "published" || currentPost.publishedAt > new Date()) {
+      throw new Error("Post not found");
+    }
 
-    const topicIds = currentPost.topics;
+    const topicIds = currentPost.topics.map((t) => t.id);
 
     const publishedFilter = {
-      _id: { $ne: currentPost._id },
+      id: { not: currentPost.id },
       status: "published",
-      published_at: { $lte: new Date() },
+      publishedAt: { lte: new Date() },
     };
-
-    const populateOpts = [
-      { path: "user_id", select: "id avatar first_name last_name" },
-      { path: "topics" },
-    ];
 
     let postByTopics = [];
     if (topicIds.length > 0) {
-      postByTopics = await Post.find({ ...publishedFilter, topics: { $in: topicIds } })
-        .populate(populateOpts)
-        .lean();
+      postByTopics = await prisma.post.findMany({
+        where: { ...publishedFilter, topics: { some: { id: { in: topicIds } } } },
+        include: POST_INCLUDE,
+      });
       postByTopics = shuffle(postByTopics).slice(0, 3);
     }
 
     let allPosts = postByTopics;
 
     if (postByTopics.length < 3) {
-      const excludeIds = [currentPost._id, ...postByTopics.map((p) => p._id)];
-      const morePosts = await Post.find({
-        ...publishedFilter,
-        _id: { $nin: excludeIds },
-      })
-        .populate(populateOpts)
-        .lean();
+      const excludeIds = [currentPost.id, ...postByTopics.map((p) => p.id)];
+      const morePosts = await prisma.post.findMany({
+        where: { ...publishedFilter, id: { notIn: excludeIds } },
+        include: POST_INCLUDE,
+      });
 
       allPosts = [...postByTopics, ...shuffle(morePosts).slice(0, 3 - postByTopics.length)];
     }
 
-    const mapped = allPosts.map((p) => ({ ...p, user: p.user_id }));
+    const mapped = allPosts.map(serializePost);
 
     const followingIds = await usersService.getUserFollowingIds(currentUser);
     const postVisible = mapped.filter((post) =>
@@ -230,28 +208,24 @@ class PostsService {
     const followingIds = await usersService.getUserFollowingIds(currentUser);
     if (!followingIds.length) return [];
 
-    const posts = await Post.find({
-      user_id: { $in: followingIds },
-      status: "published",
-      published_at: { $lte: new Date() },
-    })
-      .populate("topics")
-      .populate("user_id", "id _id avatar first_name last_name username fullname")
-      .sort({ published_at: -1, createdAt: -1 })
-      .lean();
+    const posts = await prisma.post.findMany({
+      where: {
+        userId: { in: followingIds },
+        status: "published",
+        publishedAt: { lte: new Date() },
+      },
+      include: POST_INCLUDE,
+      orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
+    });
 
-    const mapped = posts.map((p) => ({
-      ...p,
-      id: p._id.toString(),
-      user: p.user_id,
-    }));
+    const mapped = posts.map(serializePost);
 
     return this.handleLikeAndBookmarkFlags(mapped, currentUser);
   }
 
   async viewsCount(id) {
     try {
-      await Post.findByIdAndUpdate(id, { $inc: { views_count: 1 } });
+      await prisma.post.update({ where: { id }, data: { viewsCount: { increment: 1 } } });
     } catch (error) {
       console.log("Lỗi không thấy cập nhập views", error);
     }
@@ -261,53 +235,54 @@ class PostsService {
     if (!currentUser)
       throw new Error("You must be logged in to like this post.");
 
-    const existing = await Like.findOne({
-      likeable_id: postId,
-      user_id: currentUser._id,
-      likeable_type: "Post",
+    const existing = await prisma.like.findFirst({
+      where: { likeableId: postId, userId: currentUser.id, likeableType: "Post" },
     });
 
-    const post = await Post.findById(postId);
+    const post = await prisma.post.findUnique({ where: { id: postId } });
     if (!post) throw new Error("Post not found");
 
     if (existing) {
-      await existing.deleteOne();
-      post.likes_count = Math.max(0, (post.likes_count ?? 0) - 1);
-      await post.save();
-      await User.findByIdAndUpdate(post.user_id, {
-        $inc: { likes_count: -1 },
+      await prisma.like.delete({ where: { id: existing.id } });
+      await prisma.post.update({
+        where: { id: postId },
+        data: { likesCount: Math.max(0, post.likesCount - 1) },
+      });
+      await prisma.user.update({
+        where: { id: post.userId },
+        data: { likesCount: { decrement: 1 } },
       });
       return false;
     }
 
-    await Like.create({
-      likeable_id: postId,
-      user_id: currentUser._id,
-      likeable_type: "Post",
+    await prisma.like.create({
+      data: { likeableId: postId, userId: currentUser.id, likeableType: "Post" },
     });
-    post.likes_count = (post.likes_count ?? 0) + 1;
-    await post.save();
-    await User.findByIdAndUpdate(post.user_id, {
-      $inc: { likes_count: 1 },
+    await prisma.post.update({
+      where: { id: postId },
+      data: { likesCount: post.likesCount + 1 },
+    });
+    await prisma.user.update({
+      where: { id: post.userId },
+      data: { likesCount: { increment: 1 } },
     });
 
-    // Notify post author (skip if author liked their own post)
-    if (post.user_id.toString() !== currentUser._id.toString()) {
+    if (post.userId !== currentUser.id) {
       try {
         const likerName =
           currentUser.fullname ||
-          [currentUser.first_name, currentUser.last_name].filter(Boolean).join(" ") ||
+          [currentUser.firstName, currentUser.lastName].filter(Boolean).join(" ") ||
           currentUser.username;
         const notif = await notificationService.create({
-          userId: post.user_id,
+          userId: post.userId,
           type: "like",
           title: `${likerName} đã thích bài viết của bạn`,
           notifiableType: "Post",
-          notifiableId: post._id,
+          notifiableId: post.id,
           messageLink: `/blog/${post.slug}`,
         });
         emitter.emit("notification:post_like", {
-          toUserId: post.user_id.toString(),
+          toUserId: post.userId,
           notification: notif,
         });
       } catch (err) {
@@ -321,50 +296,59 @@ class PostsService {
   async create(thumbnailPath, data, currentUser) {
     if (!currentUser) throw new Error("You must be logged to edit");
 
-    const updateData = {};
+    const postData = {
+      title: data.title,
+      description: data.description,
+      content: data.content,
+      status: data.status,
+      visibility: data.visibility,
+      metaTitle: data.meta_title,
+      metaDescription: data.meta_description,
+    };
 
     if (thumbnailPath) {
-      updateData.thumbnail = thumbnailPath.path.replace(/\\/g, "/");
+      postData.thumbnail = thumbnailPath.path.replace(/\\/g, "/");
     }
 
-    if (!data.published_at) {
-      updateData.published_at = new Date();
-    }
+    postData.publishedAt = data.published_at ? new Date(data.published_at) : new Date();
 
-    const { topics, ...remain } = data;
-    const newData = { ...updateData, ...remain };
-
-    const baseSlug = slugify(newData.title, { lower: true, strict: true });
+    const baseSlug = slugify(postData.title, { lower: true, strict: true });
     let slug = baseSlug;
     let counter = 1;
-    while (await Post.findOne({ slug })) {
+    while (await prisma.post.findUnique({ where: { slug } })) {
       slug = `${baseSlug}-${counter++}`;
     }
 
-    const post = await Post.create({
-      ...newData,
-      slug,
-      user_id: currentUser._id,
+    const post = await prisma.post.create({
+      data: { ...postData, slug, userId: currentUser.id },
     });
 
-    const newTopics = JSON.parse(topics);
+    const newTopics = JSON.parse(data.topics || "[]");
     await Promise.all(
       newTopics.map(async (item) => {
         const { topic } = await topicsService.findOrCreate(item);
-        topic.posts_count = (topic.posts_count ?? 0) + 1;
-        await topic.save();
-        await Post.findByIdAndUpdate(post._id, { $addToSet: { topics: topic._id } });
+        await prisma.topic.update({
+          where: { id: topic.id },
+          data: { postsCount: { increment: 1 } },
+        });
+        await prisma.post.update({
+          where: { id: post.id },
+          data: { topics: { connect: { id: topic.id } } },
+        });
       })
     );
 
-    await User.findByIdAndUpdate(currentUser._id, { $inc: { posts_count: 1 } });
+    await prisma.user.update({
+      where: { id: currentUser.id },
+      data: { postsCount: { increment: 1 } },
+    });
 
     return post;
   }
 
   async update(id, data) {
     try {
-      return await Post.findByIdAndUpdate(id, data, { new: true });
+      return await prisma.post.update({ where: { id }, data });
     } catch (error) {
       console.log("Lỗi khi update", error);
       return null;
@@ -372,26 +356,46 @@ class PostsService {
   }
 
   async remove(id) {
-    await Post.findByIdAndDelete(id);
+    const post = await prisma.post.findUnique({ where: { id }, include: { topics: true } });
+    if (!post) return null;
+
+    const likesToRemove = await prisma.like.count({
+      where: { likeableType: "Post", likeableId: id },
+    });
+
+    await prisma.post.delete({ where: { id } });
+
+    await prisma.user.update({
+      where: { id: post.userId },
+      data: {
+        postsCount: { decrement: 1 },
+        likesCount: { decrement: likesToRemove },
+      },
+    });
+
+    await Promise.all(
+      post.topics.map((topic) =>
+        prisma.topic.update({ where: { id: topic.id }, data: { postsCount: { decrement: 1 } } })
+      )
+    );
+
     return null;
   }
 
   async search(query, currentUser = null) {
-    const regex = new RegExp(query, "i");
-    const posts = await Post.find({
-      status: "published",
-      $or: [{ title: regex }, { content: regex }],
-    })
-      .populate("topics")
-      .populate("user_id", "id avatar first_name last_name username fullname")
-      .sort({ published_at: -1 })
-      .lean();
+    const posts = await prisma.post.findMany({
+      where: {
+        status: "published",
+        OR: [
+          { title: { contains: query, mode: "insensitive" } },
+          { content: { contains: query, mode: "insensitive" } },
+        ],
+      },
+      include: POST_INCLUDE,
+      orderBy: { publishedAt: "desc" },
+    });
 
-    const mapped = posts.map((post) => ({
-      ...post,
-      id: post._id.toString(),
-      user: post.user_id,
-    }));
+    const mapped = posts.map(serializePost);
 
     return this.handleLikeAndBookmarkFlags(mapped, currentUser);
   }
