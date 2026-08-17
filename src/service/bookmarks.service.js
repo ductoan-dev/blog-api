@@ -1,21 +1,20 @@
-const { Bookmark } = require("@/db/models");
+const prisma = require("@/db/prisma");
 
 class BookmarksService {
   async toggleBookmark(currentUser, postId) {
     if (!currentUser)
       throw new Error("You must be logged in to save this post.");
 
-    const existing = await Bookmark.findOne({
-      user_id: currentUser._id,
-      post_id: postId,
+    const existing = await prisma.bookmark.findFirst({
+      where: { userId: currentUser.id, postId },
     });
 
     if (existing) {
-      await existing.deleteOne();
+      await prisma.bookmark.delete({ where: { id: existing.id } });
       return false;
     }
 
-    await Bookmark.create({ user_id: currentUser._id, post_id: postId });
+    await prisma.bookmark.create({ data: { userId: currentUser.id, postId } });
     return true;
   }
 
@@ -26,7 +25,7 @@ class BookmarksService {
     if (!Array.isArray(ids) || ids.length === 0)
       throw new Error("No bookmark IDs provided");
 
-    return await Bookmark.deleteMany({ _id: { $in: ids } });
+    return prisma.bookmark.deleteMany({ where: { id: { in: ids } } });
   }
 }
 
