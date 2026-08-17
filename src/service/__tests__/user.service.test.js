@@ -63,4 +63,30 @@ describe("user.service", () => {
 
     expect(updated.websiteUrl).toBe("https://example.com");
   });
+
+  it("getUserByUsername's full-profile branch returns a serialized (snake_case) user, not a raw Prisma row", async () => {
+    const owner = await createUser({ username: "owner-full", firstName: "Owner" });
+
+    const result = await userService.getUserByUsername("owner-full", owner);
+
+    expect(result.first_name).toBe("Owner");
+    expect(result.firstName).toBeUndefined();
+    expect(result.password).toBeUndefined();
+    expect(result.twoFactorSecret).toBeUndefined();
+  });
+
+  it("getFollowersList and getFollowingList return serialized (snake_case) users", async () => {
+    const alice = await createUser({ username: "alice2", firstName: "Alice" });
+    const bob = await createUser({ username: "bob2", firstName: "Bob" });
+
+    await userService.toggleFollow(alice, bob.id);
+
+    const followers = await userService.getFollowersList(bob.id);
+    expect(followers[0].first_name).toBe("Alice");
+    expect(followers[0].firstName).toBeUndefined();
+
+    const following = await userService.getFollowingList(alice.id);
+    expect(following[0].first_name).toBe("Bob");
+    expect(following[0].firstName).toBeUndefined();
+  });
 });

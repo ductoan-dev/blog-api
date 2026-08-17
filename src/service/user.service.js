@@ -1,6 +1,7 @@
 const prisma = require("@/db/prisma");
 const emitter = require("@/utils/emitter");
 const notificationService = require("@/service/notification.service");
+const { serializeUser } = require("@/utils/serializers");
 
 const isEmail = (value) =>
   typeof value === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
@@ -90,8 +91,7 @@ class UserService {
       };
     }
 
-    const { password, twoFactorSecret, ...safeUser } = user;
-    return safeUser;
+    return serializeUser(user);
   }
 
   async toggleFollow(currentUser, userId) {
@@ -170,7 +170,7 @@ class UserService {
       where: { followingId: userId },
       include: { follower: true },
     });
-    return follows.map((f) => f.follower);
+    return follows.map((f) => serializeUser(f.follower));
   }
 
   async getFollowingList(userId) {
@@ -178,7 +178,7 @@ class UserService {
       where: { followerId: userId },
       include: { following: true },
     });
-    return follows.map((f) => f.following);
+    return follows.map((f) => serializeUser(f.following));
   }
 
   async checkFollowing(currentUser, userId) {
@@ -264,7 +264,7 @@ class UserService {
   }
 
   async search(query) {
-    return prisma.user.findMany({
+    const users = await prisma.user.findMany({
       where: {
         OR: [
           { username: { contains: query, mode: "insensitive" } },
@@ -283,6 +283,7 @@ class UserService {
         title: true,
       },
     });
+    return users.map(serializeUser);
   }
 }
 
