@@ -1,68 +1,54 @@
-const { Post, Comment, User, Queue, Like } = require("@/db/models");
+const prisma = require("@/db/prisma");
 const likesService = require("@/service/like.service");
 const emitter = require("@/utils/emitter");
 const notificationService = require("@/service/notification.service");
+const { serializeComment } = require("@/utils/serializers");
+
+const USER_SELECT = {
+  id: true, avatar: true, firstName: true, lastName: true, email: true, username: true, fullname: true,
+};
 
 class CommentService {
   async getAll() {
-    return await Comment.find();
+    return prisma.comment.findMany();
   }
 
   async getById(id) {
-    return await Comment.findById(id).populate("post_id");
+    return prisma.comment.findUnique({ where: { id }, include: { post: true } });
   }
 
   async getBySlug(slug) {
-    const post = await Post.findOne({ slug });
+    const post = await prisma.post.findUnique({ where: { slug } });
     if (!post) return null;
-    return await Comment.find({ post_id: post._id }).populate("post_id");
+    return prisma.comment.findMany({ where: { postId: post.id }, include: { post: true } });
   }
 
   async getAllCommentsInPost(postId, currentUser) {
-    const userFields = "id avatar first_name last_name email username";
+    const comments = await prisma.comment.findMany({
+      where: { postId, deletedAt: null, parentId: null },
+      include: { user: { select: USER_SELECT } },
+    });
 
-    const comments = await Comment.find({
-      post_id: postId,
-      deleted_at: null,
-      parent_id: null,
-    })
-      .populate("user_id", userFields)
-      .lean();
-
-    const replies = await Comment.find({
-      post_id: postId,
-      deleted_at: null,
-      parent_id: { $ne: null },
-    })
-      .populate("user_id", userFields)
-      .lean();
+    const replies = await prisma.comment.findMany({
+      where: { postId, deletedAt: null, parentId: { not: null } },
+      include: { user: { select: USER_SELECT } },
+    });
 
     const replyMap = {};
     replies.forEach((r) => {
-      const key = r.parent_id.toString();
-      if (!replyMap[key]) replyMap[key] = [];
-      replyMap[key].push(r);
-    });
-
-    const normalize = (c) => ({
-      ...c,
-      id: c._id.toString(),
-      user: c.user_id,
-      created_at: c.createdAt,
-      updated_at: c.updatedAt,
+      if (!replyMap[r.parentId]) replyMap[r.parentId] = [];
+      replyMap[r.parentId].push(r);
     });
 
     const commentsWithReplies = comments.map((c) => ({
-      ...normalize(c),
-      replies: (replyMap[c._id.toString()] || []).map(normalize),
+      ...c,
+      replies: replyMap[c.id] || [],
     }));
 
     return this.likeCommentFlags(commentsWithReplies, currentUser);
   }
 
   likeCommentFlags = async (comments, currentUser) => {
-    if (!currentUser) return comments;
-
     const allComments = [];
     comments.forEach((comment) => {
       allComments.push(comment);
@@ -71,30 +57,29 @@ class CommentService {
       }
     });
 
-    const commentIds = allComments.map((c) => c._id);
-    const likes = await likesService.getAll("Comment", commentIds);
-
-    const currentUserLikes = new Set();
-    likes.forEach((like) => {
-      if (like.user_id.toString() === currentUser.id) {
-        currentUserLikes.add(like.likeable_id.toString());
-      }
-    });
+    let currentUserLikes = new Set();
+    if (currentUser) {
+      const commentIds = allComments.map((c) => c.id);
+      const likes = await likesService.getAll("Comment", commentIds);
+      likes.forEach((like) => {
+        if (like.userId === currentUser.id) {
+          currentUserLikes.add(like.likeableId);
+        }
+      });
+    }
 
     return comments.map((comment) => {
       const withFlag = {
         ...comment,
-        is_like: currentUserLikes.has(comment._id.toString()),
+        is_like: currentUserLikes.has(comment.id),
       };
-
       if (withFlag.replies && withFlag.replies.length > 0) {
         withFlag.replies = withFlag.replies.map((reply) => ({
           ...reply,
-          is_like: currentUserLikes.has(reply._id.toString()),
+          is_like: currentUserLikes.has(reply.id),
         }));
       }
-
-      return withFlag;
+      return serializeComment(withFlag);
     });
   };
 
@@ -102,29 +87,29 @@ class CommentService {
     if (!currentUser)
       throw new Error("You must be logged in to like this post.");
 
-    const existing = await Like.findOne({
-      likeable_id: commentId,
-      user_id: currentUser._id,
-      likeable_type: "Comment",
+    const existing = await prisma.like.findFirst({
+      where: { likeableId: commentId, userId: currentUser.id, likeableType: "Comment" },
     });
 
-    const comment = await Comment.findById(commentId);
+    const comment = await prisma.comment.findUnique({ where: { id: commentId } });
     if (!comment) throw new Error("Comment not found");
 
     if (existing) {
-      await existing.deleteOne();
-      comment.like_count = Math.max(0, (comment.like_count ?? 0) - 1);
-      await comment.save();
+      await prisma.like.delete({ where: { id: existing.id } });
+      await prisma.comment.update({
+        where: { id: commentId },
+        data: { likeCount: Math.max(0, comment.likeCount - 1) },
+      });
       return false;
     }
 
-    await Like.create({
-      likeable_id: commentId,
-      user_id: currentUser._id,
-      likeable_type: "Comment",
+    await prisma.like.create({
+      data: { likeableId: commentId, userId: currentUser.id, likeableType: "Comment" },
     });
-    comment.like_count = (comment.like_count ?? 0) + 1;
-    await comment.save();
+    await prisma.comment.update({
+      where: { id: commentId },
+      data: { likeCount: comment.likeCount + 1 },
+    });
     return true;
   }
 
@@ -135,12 +120,13 @@ class CommentService {
     let currentPost = null;
 
     try {
-      currentPost = await Post.findById(data.post_id);
+      currentPost = await prisma.post.findUnique({ where: { id: data.post_id } });
       if (currentPost) {
-        const userPost = await User.findById(currentPost.user_id);
-        const settings = userPost?.settings?.data
-          ? JSON.parse(userPost.settings.data)
-          : {};
+        const userPost = await prisma.user.findUnique({
+          where: { id: currentPost.userId },
+          include: { setting: true },
+        });
+        const settings = userPost?.setting?.data || {};
 
         if (settings.allowComments === false) {
           throw new Error("Bạn không thể comment bài post này");
@@ -151,65 +137,68 @@ class CommentService {
     }
 
     if (parentId) {
-      const parentComment = await Comment.findById(parentId);
+      const parentComment = await prisma.comment.findUnique({ where: { id: parentId } });
       if (!parentComment) throw new Error("Parent not found");
-      if (parentComment.parent_id) {
-        parentId = parentComment.parent_id;
+      if (parentComment.parentId) {
+        parentId = parentComment.parentId;
       }
     }
 
-    const comment = await Comment.create({
-      ...data,
-      parent_id: parentId,
-      user_id: currentUser._id,
+    const comment = await prisma.comment.create({
+      data: {
+        postId: data.post_id,
+        content: data.content,
+        parentId,
+        userId: currentUser.id,
+      },
     });
 
-    const populated = await Comment.findById(comment._id)
-      .populate("user_id", "id avatar first_name last_name email username")
-      .lean();
+    const populated = await prisma.comment.findUnique({
+      where: { id: comment.id },
+      include: { user: { select: USER_SELECT } },
+    });
 
-    const result = { ...populated, user: populated.user_id, replies: [] };
+    const result = serializeComment({ ...populated, replies: [] });
 
     try {
       if (currentPost) {
-        const userPost = await User.findById(currentPost.user_id);
-        const settings = userPost?.settings?.data
-          ? JSON.parse(userPost.settings.data)
-          : {};
-        if (
-          userPost._id.toString() !== currentUser._id.toString() &&
-          settings.emailNewComments
-        ) {
-          await Queue.create({
-            type: "sendNewCommentJob",
-            payload: {
-              userPostId: userPost._id.toString(),
-              userCommetnId: currentUser._id.toString(),
-              content: data.content,
-              post: currentPost.toObject(),
+        const userPost = await prisma.user.findUnique({
+          where: { id: currentPost.userId },
+          include: { setting: true },
+        });
+        const settings = userPost?.setting?.data || {};
+        if (userPost.id !== currentUser.id && settings.emailNewComments) {
+          await prisma.queue.create({
+            data: {
+              type: "sendNewCommentJob",
+              payload: {
+                userPostId: userPost.id,
+                userCommetnId: currentUser.id,
+                content: data.content,
+                post: currentPost,
+              },
             },
           });
         }
 
-        // In-app notification to post author
-        if (userPost._id.toString() !== currentUser._id.toString()) {
+        if (userPost.id !== currentUser.id) {
           const commenterName =
             currentUser.fullname ||
-            [currentUser.first_name, currentUser.last_name].filter(Boolean).join(" ") ||
+            [currentUser.firstName, currentUser.lastName].filter(Boolean).join(" ") ||
             currentUser.username;
           const notifTitle = parentId
             ? `${commenterName} đã trả lời bình luận trong bài viết của bạn`
             : `${commenterName} đã bình luận về bài viết của bạn`;
           const notif = await notificationService.create({
-            userId: userPost._id,
+            userId: userPost.id,
             type: "comment",
             title: notifTitle,
             notifiableType: "Post",
-            notifiableId: currentPost._id,
+            notifiableId: currentPost.id,
             messageLink: `/blog/${currentPost.slug}`,
           });
           emitter.emit("notification:post_comment", {
-            toUserId: userPost._id.toString(),
+            toUserId: userPost.id,
             notification: notif,
           });
         }
@@ -218,30 +207,26 @@ class CommentService {
       console.log(error);
     }
 
-    // Notify the direct parent comment author when this is a reply
     if (data.parent_id) {
       try {
-        const parentComment = await Comment.findById(data.parent_id)
-          .populate("user_id", "_id fullname first_name last_name username")
-          .lean();
-        if (parentComment?.user_id) {
-          const parentAuthorId = parentComment.user_id._id.toString();
-          const postAuthorId = currentPost?.user_id?.toString() || "";
-          // Skip if the parent author is the replier or the post author (already notified above)
-          if (
-            parentAuthorId !== currentUser._id.toString() &&
-            parentAuthorId !== postAuthorId
-          ) {
+        const parentComment = await prisma.comment.findUnique({
+          where: { id: data.parent_id },
+          include: { user: { select: { id: true, fullname: true, firstName: true, lastName: true, username: true } } },
+        });
+        if (parentComment?.user) {
+          const parentAuthorId = parentComment.user.id;
+          const postAuthorId = currentPost?.userId || "";
+          if (parentAuthorId !== currentUser.id && parentAuthorId !== postAuthorId) {
             const commenterName =
               currentUser.fullname ||
-              [currentUser.first_name, currentUser.last_name].filter(Boolean).join(" ") ||
+              [currentUser.firstName, currentUser.lastName].filter(Boolean).join(" ") ||
               currentUser.username;
             const notif = await notificationService.create({
-              userId: parentComment.user_id._id,
+              userId: parentComment.user.id,
               type: "comment",
               title: `${commenterName} đã trả lời bình luận của bạn`,
               notifiableType: "Post",
-              notifiableId: currentPost._id,
+              notifiableId: currentPost.id,
               messageLink: `/blog/${currentPost.slug}`,
             });
             emitter.emit("notification:post_comment", {
@@ -258,18 +243,14 @@ class CommentService {
     return result;
   }
 
-  async update(id, data) {
+  async update(id) {
     try {
-      const comment = await Comment.findById(id).select(
-        "id content deleted_at edited_at"
-      );
+      const comment = await prisma.comment.findUnique({ where: { id } });
 
       if (!comment) return null;
-      if (comment.deleted_at) return null;
+      if (comment.deletedAt) return null;
 
-      comment.deleted_at = new Date();
-      await comment.save();
-      return comment;
+      return prisma.comment.update({ where: { id }, data: { deletedAt: new Date() } });
     } catch (error) {
       console.log("Lỗi khi update:", error);
       return null;
@@ -277,7 +258,7 @@ class CommentService {
   }
 
   async remove(id) {
-    await Comment.findByIdAndDelete(id);
+    await prisma.comment.delete({ where: { id } });
     return null;
   }
 }
