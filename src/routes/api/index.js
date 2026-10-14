@@ -10,6 +10,7 @@ const likeRouter = require("./like.route");
 const bookmarkRouter = require("./booknmark.route");
 const messengerRouter = require("./messenger.route");
 const notificationRouter = require("./notification.route");
+const mediaRouter = require("./media.route");
 const { me } = require("@/controllers/auth.controller");
 
 
@@ -29,4 +30,5 @@ router.use("/bookmarks", bookmarkRouter);
 // messenger
 router.use("/messenger", messengerRouter);
 router.use("/notifications", notificationRouter);
+router.use("/media", mediaRouter);
 module.exports = router;

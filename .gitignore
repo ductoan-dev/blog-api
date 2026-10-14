@@ -1,2 +1,5 @@
 .env 
 node_modules
+
+# File người dùng upload (production lưu trên Vercel Blob)
+uploads/

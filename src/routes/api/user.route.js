@@ -4,6 +4,7 @@ const router = express.Router();
 const userController = require("@/controllers/user.controller");
 const checkAuth = require("@/middlewares/checkAuth");
 const upload = require("@/middlewares/upload");
+const persistUploads = require("@/middlewares/persistUploads");
 
 router.get("/follow/:userId", checkAuth, userController.checkFollowing);
 router.get("/:userId/followers", userController.getFollowersList);
@@ -23,6 +24,7 @@ router.put(
     { name: "avatar", maxCount: 1 },
     { name: "cover_image", maxCount: 1 },
   ]),
+  persistUploads,
   userController.editProfile
 );
 router.post("/settings", checkAuth, userController.settings);

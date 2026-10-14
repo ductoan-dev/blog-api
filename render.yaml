@@ -1,0 +1,37 @@
+# Render Blueprint — deploy blog-api từ Dockerfile.
+# Render Dashboard → New → Blueprint → chọn repo blog-api.
+# Biến `sync: false` sẽ được hỏi khi tạo Blueprint (giá trị bí mật, không commit).
+services:
+  - type: web
+    name: blog-api
+    runtime: docker
+    plan: free
+    region: singapore
+    # Áp migration trước khi chạy server (chỉ chạy migration chưa áp dụng)
+    dockerCommand: sh -c "npx prisma migrate deploy && node server.js"
+    healthCheckPath: /api/v1/topics
+    envVars:
+      # Neon Postgres (Vercel → Storage → Neon), dạng postgresql://...?sslmode=require
+      - key: DATABASE_URL
+        sync: false
+      # Vercel → Storage → Blob → token đọc/ghi, để lưu ảnh/video
+      - key: BLOB_READ_WRITE_TOKEN
+        sync: false
+      # URL frontend trên Vercel, dùng cho link xác thực email
+      - key: CLIENT_URL
+        sync: false
+      - key: MAIL_SERVICE
+        value: gmail
+      - key: MAIL_AUTH_USER
+        sync: false
+      - key: MAIL_AUTH_PASS
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: MAIL_JWT_SECRET
+        generateValue: true
+      # Free plan không có background worker -> chạy queue worker chung process
+      - key: RUN_QUEUE_WORKER
+        value: "true"
+      - key: NODE_ENV
+        value: production

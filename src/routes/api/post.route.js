@@ -5,6 +5,7 @@ const postController = require("@/controllers/post.controller");
 const checkAuth = require("@/middlewares/checkAuth");
 const optionalAuth = require("@/middlewares/optionalAuth");
 const upload = require("@/middlewares/upload");
+const persistUploads = require("@/middlewares/persistUploads");
 
 router.get("/", optionalAuth, postController.index);
 router.get("/search", optionalAuth, postController.search);
@@ -19,7 +20,7 @@ router.get("/:postId/related", postController.getRelatedPosts);
 router.get("/user/:username", checkAuth, postController.getByUserName);
 router.post("/views/:id", postController.viewsCount);
 
-router.post("/", upload.single("thumbnail"), checkAuth, postController.create);
+router.post("/", upload.single("thumbnail"), checkAuth, persistUploads, postController.create);
 router.post("/:postId/like", checkAuth, postController.toggleLike);
 router.put("/:id", postController.update);
 router.delete("/:id", postController.remove);

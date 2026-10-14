@@ -30,6 +30,15 @@ const io = new Server(server, {
 
 require("@/socket")(io);
 
-server.listen(3000, () => {
-  console.log("Server running on port 3000");
+// Host (Render...) cấp cổng qua biến PORT
+const PORT = process.env.PORT || 3000;
+
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
+
+// Nơi không có service worker riêng (Render free) thì chạy queue worker chung process.
+// Local Docker đã có container worker riêng nên không bật biến này.
+if (process.env.RUN_QUEUE_WORKER === "true") {
+  require("@/workers/queueWorker");
+}
