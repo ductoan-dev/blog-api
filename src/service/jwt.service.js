@@ -13,7 +13,7 @@ const generateAccessToken = (
   return {
     token: token,
     token_type: TOKEN_TYPE,
-    expires_in: JWT_EXPIRES_IN,
+    expires_in: expires,
   };
 };
 

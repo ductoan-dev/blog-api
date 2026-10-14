@@ -3,12 +3,44 @@ const { hash, compare } = require("@/utils/bcrypt");
 const jwtService = require("@/service/jwt.service");
 const refreshTokenService = require("@/service/refreshToken.service");
 
+const COMBINING_DIACRITICS = new RegExp("[\\u0300-\\u036f]", "g");
+
+const removeVietnameseTones = (str) =>
+  str
+    .normalize("NFD")
+    .replace(COMBINING_DIACRITICS, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D");
+
+const buildBaseUsername = (firstName, lastName) => {
+  const firstNameWords = firstName.trim().split(/\s+/);
+  const callNameWords = firstNameWords.length > 1 ? firstNameWords.slice(1) : firstNameWords;
+  const lastNameWords = lastName.trim().split(/\s+/);
+
+  const raw = removeVietnameseTones([...callNameWords, ...lastNameWords].join(""));
+  return raw.toLowerCase().replace(/[^a-z0-9]/g, "");
+};
+
+const generateUniqueUsername = async (firstName, lastName) => {
+  const baseUsername = buildBaseUsername(firstName, lastName);
+
+  let username = baseUsername;
+  let counter = 1;
+  while (await prisma.user.findUnique({ where: { username } })) {
+    username = `${baseUsername}${counter++}`;
+  }
+  return username;
+};
+
 const register = async (data) => {
+  const username = await generateUniqueUsername(data.first_name, data.last_name);
+
   const user = await prisma.user.create({
     data: {
       email: data.email,
       firstName: data.first_name,
       lastName: data.last_name,
+      username,
       password: await hash(data.password),
     },
   });
@@ -28,6 +60,10 @@ const login = async ({ email, password }) => {
   const isValid = await compare(password, user.password);
   if (!isValid) {
     throw new Error("Thông tin đăng nhập không hợp lệ");
+  }
+
+  if (!user.verifiedAt) {
+    throw new Error("Vui lòng xác thực email trước khi đăng nhập");
   }
 
   const tokenData = jwtService.generateAccessToken(user.id);

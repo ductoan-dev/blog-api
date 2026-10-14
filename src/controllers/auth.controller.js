@@ -53,7 +53,7 @@ const refreshToken = async (req, res) => {
 
 const verifyEmail = async (req, res) => {
   try {
-    const check = await authService.verifyEmail(req.body.email);
+    const check = await authService.verifyEmail(req.query.token);
     if (check === "verified") {
       return res.json({
         status: true,

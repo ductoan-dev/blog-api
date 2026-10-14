@@ -27,6 +27,56 @@ describe("auth.service", () => {
     expect(token.token).toBeTruthy();
   });
 
+  it("register drops the leading word of a multi-word first_name when generating the username", async () => {
+    const { userId } = await authService.register({
+      first_name: "nguyen duc",
+      last_name: "toan",
+      email: "ductoan1@example.com",
+      password: "Password1",
+    });
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    expect(user.username).toBe("ductoan");
+  });
+
+  it("register concatenates a single-word first_name with last_name for the username", async () => {
+    const { userId } = await authService.register({
+      first_name: "duc",
+      last_name: "toan",
+      email: "ductoan2@example.com",
+      password: "Password1",
+    });
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    expect(user.username).toBe("ductoan");
+  });
+
+  it("register appends an incrementing suffix when the generated username is already taken", async () => {
+    await createUser({ username: "ductoan", email: "existing@example.com" });
+
+    const { userId } = await authService.register({
+      first_name: "duc",
+      last_name: "toan",
+      email: "ductoan3@example.com",
+      password: "Password1",
+    });
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    expect(user.username).toBe("ductoan1");
+  });
+
+  it("register strips Vietnamese diacritics when generating the username", async () => {
+    const { userId } = await authService.register({
+      first_name: "Đức",
+      last_name: "Toàn",
+      email: "ductoan4@example.com",
+      password: "Password1",
+    });
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    expect(user.username).toBe("ductoan");
+  });
+
   it("login returns a token plus a refresh_token for correct credentials", async () => {
     await createUser({ email: "bob@example.com", password: await hash("Password1") });
 

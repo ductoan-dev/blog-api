@@ -17,10 +17,12 @@ async function sendVerifyEmailJob(job) {
 
     const { token } = jwtService.generateAccessToken(
       userId,
-      process.env.MAIL_JWT_SECRET
+      process.env.MAIL_JWT_SECRET,
+      "60s"
     );
 
     const verifyUrl = `${process.env.CLIENT_URL}/verify-email?token=${token}`;
+
     const data = { token, userId, verifyUrl };
     const template = await loadEmail("verify-email", data);
 
