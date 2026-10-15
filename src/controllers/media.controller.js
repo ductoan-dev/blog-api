@@ -1,8 +1,9 @@
 const response = require("@/utils/response");
 
-const uploadVideo = async (req, res) => {
+// Trả về path (local) hoặc URL Vercel Blob (production) của file vừa upload
+const uploadMedia = async (req, res) => {
   if (!req.file) {
-    return response.error(res, 400, "Vui lòng chọn file video");
+    return response.error(res, 400, "Vui lòng chọn file");
   }
 
   response.succsess(res, 201, {
@@ -13,5 +14,5 @@ const uploadVideo = async (req, res) => {
 };
 
 module.exports = {
-  uploadVideo,
+  uploadMedia,
 };

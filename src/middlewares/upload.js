@@ -24,20 +24,32 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
-const VIDEO_MAX_SIZE = 100 * 1024 * 1024; // 100MB
-const VIDEO_MIME_TYPES = ["video/mp4", "video/webm", "video/ogg", "video/quicktime"];
+// Upload có giới hạn dung lượng + định dạng (ảnh/video chèn trong bài viết)
+const createMediaUpload = ({ maxSize, mimeTypes, invalidTypeMessage }) =>
+  multer({
+    storage,
+    limits: { fileSize: maxSize },
+    fileFilter: function (req, file, cb) {
+      if (mimeTypes.includes(file.mimetype)) return cb(null, true);
 
-const videoUpload = multer({
-  storage,
-  limits: { fileSize: VIDEO_MAX_SIZE },
-  fileFilter: function (req, file, cb) {
-    if (VIDEO_MIME_TYPES.includes(file.mimetype)) return cb(null, true);
+      const error = new Error(invalidTypeMessage);
+      error.status = 400;
+      cb(error);
+    },
+  });
 
-    const error = new Error("Chỉ hỗ trợ video MP4, WebM, OGG hoặc MOV");
-    error.status = 400;
-    cb(error);
-  },
+const videoUpload = createMediaUpload({
+  maxSize: 100 * 1024 * 1024, // 100MB
+  mimeTypes: ["video/mp4", "video/webm", "video/ogg", "video/quicktime"],
+  invalidTypeMessage: "Chỉ hỗ trợ video MP4, WebM, OGG hoặc MOV",
+});
+
+const imageUpload = createMediaUpload({
+  maxSize: 10 * 1024 * 1024, // 10MB
+  mimeTypes: ["image/jpeg", "image/png", "image/gif", "image/webp"],
+  invalidTypeMessage: "Chỉ hỗ trợ ảnh JPG, PNG, GIF hoặc WebP",
 });
 
 module.exports = upload;
 module.exports.videoUpload = videoUpload;
+module.exports.imageUpload = imageUpload;
