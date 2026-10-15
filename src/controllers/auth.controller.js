@@ -13,7 +13,7 @@ const register = async (req, res) => {
 
     response.succsess(res, 200, token);
   } catch (error) {
-    response.error(res, 400, error.message);
+    response.error(res, error.status || 400, error.message);
   }
 };
 

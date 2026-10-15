@@ -32,7 +32,29 @@ const generateUniqueUsername = async (firstName, lastName) => {
   return username;
 };
 
+const conflictError = (message) => Object.assign(new Error(message), { status: 409 });
+
+// Email đã có: chưa xác thực thì gửi lại mail (link cũ có thể đã hết hạn),
+// đã xác thực thì báo trùng. Tránh trả lỗi unique thô của Prisma ra ngoài.
+const rejectExistingEmail = async (email) => {
+  const existing = await prisma.user.findUnique({ where: { email } });
+  if (!existing) return;
+
+  if (!existing.verifiedAt) {
+    await prisma.queue.create({
+      data: { type: "sendVerifyEmailJob", payload: { userId: existing.id } },
+    });
+    throw conflictError(
+      "Email này đã đăng ký nhưng chưa xác thực. Chúng tôi đã gửi lại email xác thực, vui lòng kiểm tra hộp thư (cả mục Spam)."
+    );
+  }
+
+  throw conflictError("Email này đã được sử dụng");
+};
+
 const register = async (data) => {
+  await rejectExistingEmail(data.email);
+
   const username = await generateUniqueUsername(data.first_name, data.last_name);
 
   const user = await prisma.user.create({

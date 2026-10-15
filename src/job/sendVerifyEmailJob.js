@@ -15,10 +15,11 @@ async function sendVerifyEmailJob(job) {
       throw new Error(`User not found with ID: ${userId}`);
     }
 
+    // 24h: mail can arrive late (spam folder, sleeping free-tier server)
     const { token } = jwtService.generateAccessToken(
       userId,
       process.env.MAIL_JWT_SECRET,
-      "60s"
+      "24h"
     );
 
     const verifyUrl = `${process.env.CLIENT_URL}/verify-email?token=${token}`;

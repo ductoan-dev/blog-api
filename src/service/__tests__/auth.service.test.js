@@ -27,6 +27,38 @@ describe("auth.service", () => {
     expect(token.token).toBeTruthy();
   });
 
+  it("register re-sends the verify email and rejects with 409 when the email exists but is unverified", async () => {
+    const existing = await createUser({ email: "pending@example.com", verifiedAt: null });
+
+    await expect(
+      authService.register({
+        first_name: "Pending",
+        last_name: "User",
+        email: "pending@example.com",
+        password: "Password1",
+      })
+    ).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/chưa xác thực/) });
+
+    const jobs = await prisma.queue.findMany({ where: { type: "sendVerifyEmailJob" } });
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].payload).toEqual({ userId: existing.id });
+  });
+
+  it("register rejects with 409 and queues nothing when the email belongs to a verified user", async () => {
+    await createUser({ email: "taken@example.com", verifiedAt: new Date() });
+
+    await expect(
+      authService.register({
+        first_name: "Taken",
+        last_name: "User",
+        email: "taken@example.com",
+        password: "Password1",
+      })
+    ).rejects.toMatchObject({ status: 409, message: "Email này đã được sử dụng" });
+
+    expect(await prisma.queue.count()).toBe(0);
+  });
+
   it("register drops the leading word of a multi-word first_name when generating the username", async () => {
     const { userId } = await authService.register({
       first_name: "nguyen duc",
