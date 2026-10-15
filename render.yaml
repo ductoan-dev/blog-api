@@ -7,8 +7,9 @@ services:
     runtime: docker
     plan: free
     region: singapore
-    # Áp migration trước khi chạy server (chỉ chạy migration chưa áp dụng)
-    dockerCommand: sh -c "npx prisma migrate deploy && node server.js"
+    # Áp migration trước khi chạy server (xem script start:prod trong package.json).
+    # Không dùng `sh -c "..."`: Render giữ nguyên dấu ngoặc kép -> "command not found".
+    dockerCommand: npm run start:prod
     healthCheckPath: /api/v1/topics
     envVars:
       # Neon Postgres (Vercel → Storage → Neon), dạng postgresql://...?sslmode=require

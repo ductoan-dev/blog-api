@@ -6,6 +6,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "dev": "nodemon server.js",
+    "start:prod": "prisma migrate deploy && node server.js",
     "seed": "node src/db/seed.js",
     "queue": "node --watch src/workers/queueWorker.js",
     "prisma:generate": "prisma generate",
