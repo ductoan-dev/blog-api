@@ -110,7 +110,7 @@ describe("auth.service", () => {
   });
 
   it("login returns a token plus a refresh_token for correct credentials", async () => {
-    await createUser({ email: "bob@example.com", password: await hash("Password1") });
+    await createUser({ email: "bob@example.com", password: await hash("Password1"), verifiedAt: new Date() });
 
     const result = await authService.login({ email: "bob@example.com", password: "Password1" });
 

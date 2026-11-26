@@ -15,6 +15,7 @@ const { me } = require("@/controllers/auth.controller");
 
 
 const router = express.Router();
+router.use("/ai", require("./ai.route"));
 
 // auth
 router.use("/auth", authRouter);

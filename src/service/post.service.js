@@ -9,6 +9,16 @@ const { serializePost } = require("@/utils/serializers");
 
 const POST_INCLUDE = { user: true, topics: true, tags: true };
 
+async function queueAiIndex(postId) {
+  try {
+    await require("@/service/aiIndex.service").enqueue(postId);
+  } catch {
+    // Publication succeeds even when AI is unavailable. The reconciliation
+    // command discovers missing/outdated indexes without exposing stale text.
+    console.error("[AI] Could not enqueue post; reconciliation required.");
+  }
+}
+
 class PostsService {
   async getAll(currentUser = null) {
     const posts = await prisma.post.findMany({
@@ -343,12 +353,17 @@ class PostsService {
       data: { postsCount: { increment: 1 } },
     });
 
+    await queueAiIndex(post.id);
     return post;
   }
 
   async update(id, data) {
     try {
-      return await prisma.post.update({ where: { id }, data });
+      const post = await prisma.post.update({ where: { id }, data });
+      if (["title", "description", "content", "status", "visibility", "publishedAt"].some((field) => field in data)) {
+        await queueAiIndex(post.id);
+      }
+      return post;
     } catch (error) {
       console.log("Lỗi khi update", error);
       return null;

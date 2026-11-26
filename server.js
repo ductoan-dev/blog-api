@@ -12,7 +12,9 @@ const errorHandler = require("@/middlewares/errors/errorHandler");
 const notFoudHandler = require("@/middlewares/errors/notFoundHandler");
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ verify: (req, res, buffer) => {
+  if (req.originalUrl.startsWith("/api/v1/ai/")) req.rawBody = buffer.toString("utf8");
+} }));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static("public"));
 app.use("/api/v1/uploads", express.static(path.join(__dirname, "uploads")));

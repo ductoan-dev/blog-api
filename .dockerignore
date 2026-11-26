@@ -4,6 +4,9 @@ npm-debug.log
 .gitignore
 .env
 .env.test
+.env*
+.local-backups
+.vercel
 .superpowers
 uploads
 server_out.txt

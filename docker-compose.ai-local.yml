@@ -1,0 +1,21 @@
+services:
+  ai-postgres:
+    image: pgvector/pgvector:pg16
+    container_name: blog-ai-postgres-local
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: blog_ai
+      POSTGRES_PASSWORD: blog_ai_local
+      POSTGRES_DB: blog_ai_local
+    ports:
+      - "127.0.0.1:5434:5432"
+    volumes:
+      - blog_ai_local_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U blog_ai -d blog_ai_local"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  blog_ai_local_data:

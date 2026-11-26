@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "buildCommand": "prisma generate",
+  "outputDirectory": "public",
+  "functions": { "api/ai.js": { "maxDuration": 180, "includeFiles": "src/**" } },
+  "rewrites": [
+    { "source": "/api/v1/ai/:path*", "destination": "/api/ai" }
+  ],
+  "crons": [{ "path": "/api/v1/ai/jobs/dispatch", "schedule": "0 0 * * *" }]
+}

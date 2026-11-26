@@ -1,0 +1,15 @@
+.git
+.vercel
+node_modules
+.env*
+.local-backups
+uploads
+server_out.txt
+server_err.txt
+*.log
+src/test
+src/**/__tests__
+vitest*.js
+docker-compose*.yml
+docs
+.superpowers

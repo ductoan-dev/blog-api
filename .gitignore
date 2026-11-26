@@ -1,5 +1,10 @@
 .env 
 node_modules
+.env.ai.local
+.local-backups/
 
 # File người dùng upload (production lưu trên Vercel Blob)
 uploads/
+
+.vercel
+.env*

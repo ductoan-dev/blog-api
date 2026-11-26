@@ -88,6 +88,8 @@ model Post {
   tags      Tag[]      @relation("PostTags")
   comments  Comment[]
   bookmarks Bookmark[]
+  aiIndex   PostAiIndex?
+  aiJob     AiIndexJob?
 
   @@map("posts")
 }
@@ -255,4 +257,51 @@ model Queue {
   updatedAt    DateTime  @updatedAt @map("updated_at")
 
   @@map("queue")
+}
+
+model PostAiIndex {
+  postId         String   @id @map("post_id")
+  sourceHash     String   @map("source_hash")
+  embeddingModel String   @map("embedding_model")
+  indexedAt      DateTime @default(now()) @map("indexed_at")
+  post           Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  chunks         PostChunk[]
+
+  @@map("post_ai_indexes")
+}
+
+model PostChunk {
+  id        String   @id @default(uuid())
+  postId    String   @map("post_id")
+  position  Int
+  content   String
+  embedding Unsupported("vector(1536)")
+  index     PostAiIndex @relation(fields: [postId], references: [postId], onDelete: Cascade)
+
+  @@unique([postId, position])
+  @@map("post_chunks")
+}
+
+model AiIndexJob {
+  postId      String    @id @map("post_id")
+  status      String    @default("pending")
+  revision    Int       @default(1)
+  attempts    Int       @default(0)
+  availableAt DateTime  @default(now()) @map("available_at")
+  lockedAt    DateTime? @map("locked_at")
+  lastError   String?   @map("last_error")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  post        Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([status, availableAt])
+  @@map("ai_index_jobs")
+}
+
+model AiRateLimit {
+  key         String
+  windowStart DateTime @map("window_start")
+  count       Int      @default(1)
+
+  @@id([key, windowStart])
+  @@map("ai_rate_limits")
 }
